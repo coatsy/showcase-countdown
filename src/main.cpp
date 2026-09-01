@@ -1,6 +1,8 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 
+#include <string.h>
+
 #include "env_config.h"
 #include "fanfare.h"
 #include "voice_assign.h"
@@ -19,6 +21,139 @@ constexpr uint32_t RESYNC_INTERVAL_MS = 6UL * 60 * 60 * 1000;  // requirement 3
 // wall clock is more robust than sntp_get_sync_status(), whose return values
 // differ across core versions and sync modes.
 constexpr time_t SANE_EPOCH = 1750000000;  // 2025-06-15
+
+const char* const TITLES[] = EVENT_TITLES;
+constexpr size_t TITLE_COUNT = EVENT_TITLE_COUNT;
+
+constexpr uint32_t MARQUEE_MS_PER_PX = 15;  // ~65 px/sec
+constexpr int MARQUEE_GAP = 24;             // blank run between wrapped copies
+constexpr uint32_t MARQUEE_MIN_LOOPS = 2;
+constexpr uint32_t FRAME_MS_SCROLLING = 40;
+constexpr uint32_t FRAME_MS_IDLE = 200;
+
+size_t titleIndex = 0;
+uint32_t titleStartMs = 0;
+bool titleScrolling = false;
+bool celebrationScrolling = false;
+uint32_t titleCycleMs = TITLE_DWELL_MS;
+
+// ---------------------------------------------------------------------------
+// Title colour markup
+//
+// Titles may carry inline tags: [red]Westpac[/] + [blue]Microsoft[/] Hackathon
+// [/] resets to the default. [#RRGGBB] gives any colour without a code change,
+// which is what keeps the palette configurable from .env.
+// ---------------------------------------------------------------------------
+
+constexpr uint16_t TITLE_DEFAULT_COLOUR = 0xFFFF;  // white
+
+struct NamedColour {
+    const char* name;
+    uint16_t value;
+};
+
+// RGB565 literals rather than TFT_* macros, so the palette does not depend on
+// which colour names a given M5GFX version happens to define.
+const NamedColour NAMED_COLOURS[] = {
+    {"red", 0xF800},    {"green", 0x07E0},  {"blue", 0x001F},     {"yellow", 0xFFE0},
+    {"cyan", 0x07FF},   {"magenta", 0xF81F}, {"white", 0xFFFF},   {"orange", 0xFD20},
+    {"grey", 0x8410},   {"gray", 0x8410},   {"skyblue", 0x867D}, {"pink", 0xFE19},
+};
+
+uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+int hexDigit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// Unrecognised tags deliberately fail to parse so they render as literal text.
+// Silently swallowing a typo would be far harder to diagnose on a 240 px screen.
+bool parseColourTag(const char* p, const char** afterTag, uint16_t* colour) {
+    if (*p != '[') {
+        return false;
+    }
+    const char* close = strchr(p, ']');
+    if (close == nullptr) {
+        return false;
+    }
+    const char* body = p + 1;
+    const size_t length = static_cast<size_t>(close - body);
+
+    if (length == 1 && body[0] == '/') {
+        *colour = TITLE_DEFAULT_COLOUR;
+        *afterTag = close + 1;
+        return true;
+    }
+
+    if (length == 7 && body[0] == '#') {
+        int value[6];
+        for (int i = 0; i < 6; ++i) {
+            value[i] = hexDigit(body[1 + i]);
+            if (value[i] < 0) {
+                return false;
+            }
+        }
+        *colour = rgb565(static_cast<uint8_t>(value[0] << 4 | value[1]),
+                         static_cast<uint8_t>(value[2] << 4 | value[3]),
+                         static_cast<uint8_t>(value[4] << 4 | value[5]));
+        *afterTag = close + 1;
+        return true;
+    }
+
+    for (const NamedColour& candidate : NAMED_COLOURS) {
+        if (strlen(candidate.name) == length && strncmp(candidate.name, body, length) == 0) {
+            *colour = candidate.value;
+            *afterTag = close + 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Measures when draw is false, renders when true. One implementation so the
+// marquee's width can never disagree with what is actually drawn.
+int renderTitleMarkup(LovyanGFX* g, const char* text, int x, int y, bool draw) {
+    uint16_t colour = TITLE_DEFAULT_COLOUR;
+    char run[64];
+    size_t runLength = 0;
+    int cursor = x;
+
+    for (const char* p = text;;) {
+        const bool atEnd = (*p == '\0');
+        const char* afterTag = nullptr;
+        uint16_t tagColour = TITLE_DEFAULT_COLOUR;
+        const bool isTag = !atEnd && parseColourTag(p, &afterTag, &tagColour);
+
+        if (atEnd || isTag) {
+            if (runLength > 0) {
+                run[runLength] = '\0';
+                if (draw) {
+                    g->setTextColor(colour);
+                    g->drawString(run, cursor, y);
+                }
+                cursor += g->textWidth(run);
+                runLength = 0;
+            }
+            if (atEnd) {
+                break;
+            }
+            colour = tagColour;
+            p = afterTag;
+            continue;
+        }
+
+        if (runLength + 1 < sizeof(run)) {
+            run[runLength++] = *p;
+        }
+        ++p;
+    }
+    return cursor - x;
+}
 
 // Below this, leave the 1 Hz render loop and start spinning on the clock.
 // The loop period, not NTP jitter, is the dominant error term for ensemble
@@ -126,6 +261,29 @@ void ensureSprite() {
     spriteReady = sprite().createSprite(layout.w, layout.h) != nullptr;
 }
 
+// Font7 is a seven-segment face: '1' lights only the right-hand segments yet
+// still occupies a full-width cell, so any string containing one sits visually
+// right of its advance box. Return the nudge needed to align the label with the
+// ink the eye actually sees rather than with the font metrics.
+int inkOffset(LovyanGFX* g, const char* digits) {
+    if (layout.numberFont != static_cast<const lgfx::IFont*>(&fonts::Font7)) {
+        return 0;
+    }
+    int length = 0;
+    int ones = 0;
+    for (const char* p = digits; *p; ++p) {
+        ++length;
+        if (*p == '1') {
+            ++ones;
+        }
+    }
+    if (length == 0 || ones == 0) {
+        return 0;
+    }
+    // A '1' glyph's ink centre sits roughly 30% of a cell right of the cell centre.
+    return (g->textWidth("8") * 3 * ones) / (10 * length);
+}
+
 void drawUnit(LovyanGFX* g, long value, const char* label, int centreX, int top, int labelTop) {
     char digits[12];
     snprintf(digits, sizeof(digits), "%ld", value);
@@ -135,12 +293,64 @@ void drawUnit(LovyanGFX* g, long value, const char* label, int centreX, int top,
     g->setTextColor(TFT_WHITE);
     g->drawString(digits, centreX, top);
 
+    const int labelX = centreX + inkOffset(g, digits);
+
     // Cyan, not dark grey: this has to read across a room, and low-contrast
     // grey on black disappears entirely at any distance.
     g->setFont(layout.labelFont);
     g->setTextDatum(top_center);
     g->setTextColor(TFT_CYAN);
-    g->drawString(label, centreX, labelTop);
+    g->drawString(label, labelX, labelTop);
+}
+
+// Draws a title centred, or scrolling when it is wider than the screen, with
+// colour markup respected either way. Returns the scroll span in pixels, or 0
+// when the title fits without scrolling.
+int drawMarqueeTitle(LovyanGFX* g, const char* title, int y, int bandH, uint32_t elapsed) {
+    g->setFont(layout.titleFont);
+    g->setTextDatum(top_left);
+
+    const int avail = layout.w - 4;
+    const int textW = renderTitleMarkup(g, title, 0, 0, false);
+
+    if (textW <= avail) {
+        renderTitleMarkup(g, title, (layout.w - textW) / 2, y, true);
+        return 0;
+    }
+
+    // Drawn twice a span apart so the wrap is seamless rather than blanking out
+    // between repeats.
+    const int span = textW + MARQUEE_GAP;
+    const int shift = static_cast<int>((elapsed / MARQUEE_MS_PER_PX) % span);
+    g->setClipRect(2, y, avail, bandH);
+    renderTitleMarkup(g, title, 2 - shift, y, true);
+    renderTitleMarkup(g, title, 2 - shift + span, y, true);
+    g->clearClipRect();
+    return span;
+}
+
+void drawTitle(LovyanGFX* g, int titleH) {
+    const uint32_t elapsed = millis() - titleStartMs;
+
+    // Blank pause between titles. Only the title area clears; the rule and
+    // countdown below stay put.
+    if (TITLE_COUNT > 1 && elapsed >= titleCycleMs) {
+        titleScrolling = false;
+        return;
+    }
+
+    const int span = drawMarqueeTitle(g, TITLES[titleIndex], 2, titleH + 2, elapsed);
+    titleScrolling = span > 0;
+
+    if (span > 0) {
+        // Long titles get at least two full passes, so someone who glances up
+        // midway through still sees the whole message.
+        const uint32_t scrollMs =
+            static_cast<uint32_t>(span) * MARQUEE_MS_PER_PX * MARQUEE_MIN_LOOPS;
+        titleCycleMs = scrollMs > TITLE_DWELL_MS ? scrollMs : TITLE_DWELL_MS;
+    } else {
+        titleCycleMs = TITLE_DWELL_MS;
+    }
 }
 
 void drawCountdown(LovyanGFX* g, int64_t remaining) {
@@ -148,9 +358,7 @@ void drawCountdown(LovyanGFX* g, int64_t remaining) {
 
     g->setFont(layout.titleFont);
     const int titleH = g->fontHeight();
-    g->setTextDatum(top_center);
-    g->setTextColor(TFT_WHITE);
-    g->drawString(EVENT_NAME, layout.w / 2, 2);
+    drawTitle(g, titleH);
 
     const int ruleY = titleH + 6;
     g->drawFastHLine(6, ruleY, layout.w - 12, TFT_DARKGREY);
@@ -221,20 +429,37 @@ void renderDiagnostics() {
 // Celebration
 // ---------------------------------------------------------------------------
 
-void drawCelebrationFrame(uint32_t elapsedMs) {
-    // Cheap, allocation-free, and safe to call at whatever rate the note loop
-    // gives us. Audio has already started by the time we get here.
-    const uint8_t phase = static_cast<uint8_t>((elapsedMs / 90) % 6);
-    static const uint16_t palette[6] = {TFT_RED,   TFT_YELLOW, TFT_GREEN,
-                                        TFT_CYAN,  TFT_BLUE,   TFT_MAGENTA};
+void drawCelebration(LovyanGFX* g, uint32_t elapsedMs, bool flashing) {
+    static const uint16_t palette[6] = {TFT_RED,  TFT_YELLOW, TFT_GREEN,
+                                        TFT_CYAN, TFT_BLUE,   TFT_MAGENTA};
+    const uint16_t accent = flashing ? palette[(elapsedMs / 90) % 6] : TFT_CYAN;
 
-    M5.Display.fillScreen(palette[phase]);
-    M5.Display.setFont(layout.titleFont);
-    M5.Display.setTextDatum(middle_center);
-    M5.Display.setTextColor(TFT_BLACK);
-    M5.Display.drawString(EVENT_NAME, layout.w / 2, layout.h / 2 - 10);
-    M5.Display.setFont(layout.labelFont);
-    M5.Display.drawString("IT'S HERE", layout.w / 2, layout.h / 2 + 16);
+    // The flash is a border, not a background fill: a cycling fill would put the
+    // title's own markup colours against a clashing colour and, at worst, render
+    // red text on a red screen.
+    g->fillRect(0, 0, layout.w, layout.h, TFT_BLACK);
+    g->drawRect(0, 0, layout.w, layout.h, accent);
+    g->drawRect(1, 1, layout.w - 2, layout.h - 2, accent);
+
+    g->setFont(layout.titleFont);
+    const int titleH = g->fontHeight();
+    const int titleY = layout.h / 2 - titleH - 2;
+    celebrationScrolling = drawMarqueeTitle(g, TITLES[0], titleY, titleH + 2, elapsedMs) > 0;
+
+    g->setFont(layout.labelFont);
+    g->setTextDatum(middle_center);
+    g->setTextColor(accent);
+    g->drawString("IT'S HERE", layout.w / 2, layout.h / 2 + 20);
+}
+
+void renderCelebration(uint32_t elapsedMs, bool flashing) {
+    ensureSprite();
+    if (spriteReady) {
+        drawCelebration(&sprite(), elapsedMs, flashing);
+        sprite().pushSprite(0, 0);
+    } else {
+        drawCelebration(&M5.Display, elapsedMs, flashing);
+    }
 }
 
 void performCelebration() {
@@ -252,13 +477,12 @@ void performCelebration() {
 
         const uint32_t noteEnd = millis() + note.ms;
         while (static_cast<int32_t>(noteEnd - millis()) > 0) {
-            drawCelebrationFrame(millis() - start);
+            renderCelebration(millis() - start, true);
             M5.delay(1);
         }
     }
 
     M5.Speaker.stop();
-    renderMessage(EVENT_NAME, "IT'S HERE");
 }
 
 void auditionAllVoices() {
@@ -506,6 +730,7 @@ void setup() {
     Serial.printf("  panel   : %dx%d\n", layout.w, layout.h);
     Serial.printf("  speaker : %s\n", M5.Speaker.isEnabled() ? "present" : "ABSENT");
     Serial.printf("  event   : %s\n", EVENT_NAME);
+    Serial.printf("  titles  : %u\n", static_cast<unsigned>(TITLE_COUNT));
     Serial.printf("  target  : %lld\n", static_cast<long long>(EVENT_EPOCH_UTC));
     // MAC and roll are printed so `pio run -t fleet` output can be reconciled
     // against scripts/fleet_voices.py.
@@ -531,6 +756,7 @@ void setup() {
         auditionAllVoices();
     }
 
+    titleStartMs = millis();
     renderMessage(EVENT_NAME, "syncing...");
     syncFromNtp();
 }
@@ -575,14 +801,25 @@ void loop() {
     }
 
     if (fired) {
-        M5.delay(200);
+        // Keep rendering so a long title carries on scrolling after the melody.
+        renderCelebration(millis(), false);
+        M5.delay(celebrationScrolling ? FRAME_MS_SCROLLING : FRAME_MS_IDLE);
         return;
     }
 
     if (showDiagnostics) {
         renderDiagnostics();
-    } else {
-        renderCountdown(remaining);
+        M5.delay(FRAME_MS_IDLE);
+        return;
     }
-    M5.delay(200);
+
+    renderCountdown(remaining);
+
+    if (TITLE_COUNT > 1 && millis() - titleStartMs >= titleCycleMs + TITLE_GAP_MS) {
+        titleIndex = (titleIndex + 1) % TITLE_COUNT;
+        titleStartMs = millis();
+    }
+
+    // Only pay for a fast redraw while a title is actually moving.
+    M5.delay(titleScrolling ? FRAME_MS_SCROLLING : FRAME_MS_IDLE);
 }

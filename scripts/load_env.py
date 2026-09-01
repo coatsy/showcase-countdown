@@ -28,10 +28,20 @@ DEFAULTS = {
     "NTP_SERVER_2": '"1.pool.ntp.org"',
     "NTP_SERVER_3": '"2.pool.ntp.org"',
     "BRIGHTNESS": "80",
+    "TITLE_DWELL_MS": "5000",
+    "TITLE_GAP_MS": "300",
 }
 
 _LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 _NUMERIC = re.compile(r"^[+-]?(?:\d+|\d*\.\d+)$")
+
+# Colour markup such as [red] / [#FF0000] / [/]. Stripped for the plain-text
+# EVENT_NAME, kept intact in EVENT_TITLES where it is rendered.
+_MARKUP = re.compile(r"\[(?:/|#[0-9A-Fa-f]{6}|[A-Za-z]+)\]")
+
+
+def strip_markup(text):
+    return _MARKUP.sub("", text).strip()
 
 
 def fail(message):
@@ -106,8 +116,19 @@ def render(entries, epoch, parsed):
         "#define EVENT_EPOCH_UTC %dLL" % epoch,
         "",
     ]
+
+    # EVENT_NAME is pipe-separated so one key can carry a rotating set of titles.
+    titles = [part.strip() for part in entries["EVENT_NAME"][0].split("|")]
+    titles = [title for title in titles if title]
+    if not titles:
+        sys.exit("load_env: EVENT_NAME is empty")
+    lines.append("#define EVENT_NAME %s" % c_string(strip_markup(titles[0])))
+    lines.append("#define EVENT_TITLE_COUNT %d" % len(titles))
+    lines.append("#define EVENT_TITLES {%s}" % ", ".join(c_string(t) for t in titles))
+    lines.append("")
+
     for key in sorted(entries):
-        if key == "EVENT_DATETIME":
+        if key in ("EVENT_DATETIME", "EVENT_NAME"):
             continue
         value, quoted = entries[key]
         lines.append("#define %s %s" % (key, literal(value, quoted)))
