@@ -3,11 +3,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// A 4-second open-fifth fanfare split across three monophonic voices.
+// A 12-second open-fifth fanfare split across three monophonic voices.
 //
 // Each unit plays exactly ONE voice start-to-finish. The harmony is an emergent
 // property of the room: with 5-10 units drawing weighted-random voices, the
 // ensemble sounds a C pedal, a moving fifth, and a melody line.
+//
+// Ternary form, three equal four-second sections:
+//
+//   A   0-4000    statement
+//   B   4000-8000 development - melody falls from the summit and climbs back
+//   A'  8000-12000 restatement, ending on a longer held final
 //
 // There is deliberately no third anywhere in the piece. The palette is C-D-F-G
 // only, so the harmony stays quartal/suspended and resolves to a bare open
@@ -34,7 +40,7 @@ constexpr float F6 = 1396.91f;
 constexpr float G6 = 1567.98f;
 constexpr float C7 = 2093.00f;
 
-constexpr uint32_t DURATION_MS = 4000;
+constexpr uint32_t DURATION_MS = 12000;
 
 // ---------------------------------------------------------------------------
 // Voice 0 - ROOT (weight 40%)
@@ -47,13 +53,34 @@ constexpr uint32_t DURATION_MS = 4000;
 // the most units. If it still disappears on hardware, raise TRANSPOSE[0].
 // ---------------------------------------------------------------------------
 constexpr Note VOICE_ROOT[] = {
+    // A - statement
     {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},   // 0-400    triple-hit pickup
     {C5, 350},   {REST, 50},                            // 400-800  arrival
     {C5, 200},   {REST, 50},  {C5, 200},  {REST, 50},
     {C5, 200},                                          // 800-1500 pulse
     {C5, 500},   {REST, 100},                           // 1500-2100 under the melody peak
     {C5, 250},   {REST, 50},  {C5, 250},  {REST, 50},   // 2100-2700 turn
-    {C5, 1300},                                         // 2700-4000 final pedal
+    {C5, 1300},                                         // 2700-4000 arrival pedal
+
+    // B - development. The pedal stops sustaining and becomes a driving
+    // ostinato, which is what keeps the middle section from sagging.
+    {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},
+    {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},   // 4000-4800 four-hit drive
+    {C5, 350},   {REST, 50},                            // 4800-5200
+    {C5, 350},   {REST, 50},                            // 5200-5600
+    {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},   // 5600-6000
+    {C5, 600},   {REST, 100},                           // 6000-6700 under the sus4
+    {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},   // 6700-7100
+    {C5, 900},                                          // 7100-8000 pivot back
+
+    // A' - restatement
+    {C5, 150},   {REST, 50},  {C5, 150},  {REST, 50},   // 8000-8400
+    {C5, 350},   {REST, 50},                            // 8400-8800
+    {C5, 200},   {REST, 50},  {C5, 200},  {REST, 50},
+    {C5, 200},                                          // 8800-9500
+    {C5, 400},   {REST, 100},                           // 9500-10000
+    {C5, 250},   {REST, 50},  {C5, 250},  {REST, 50},   // 10000-10600
+    {C5, 1400},                                         // 10600-12000 final pedal
 };
 
 // ---------------------------------------------------------------------------
@@ -69,12 +96,32 @@ constexpr Note VOICE_ROOT[] = {
 // if the draw left it empty.
 // ---------------------------------------------------------------------------
 constexpr Note VOICE_FIFTH[] = {
+    // A - statement
     {G5, 150},   {REST, 50},  {G5, 150},  {REST, 50},   // 0-400    doubles melody pickup
     {G5, 400},                                          // 400-800  arrival
     {G5, 350},   {REST, 50},  {G5, 300},                // 800-1500 sustain
     {F5, 600},                                          // 1500-2100 sus4 tension
     {G5, 600},                                          // 2100-2700 resolution
-    {G5, 1300},                                         // 2700-4000 final fifth
+    {G5, 1300},                                         // 2700-4000 arrival fifth
+
+    // B - development. Lifts an octave into the melody's register, adds a 9th,
+    // then falls back to the sus4 to set up the return.
+    {G5, 150},   {REST, 50},  {G5, 150},  {REST, 50},   // 4000-4400
+    {C6, 400},                                          // 4400-4800 octave lift
+    {C6, 350},   {REST, 50},                            // 4800-5200
+    {D6, 400},                                          // 5200-5600 add9 colour
+    {C6, 400},                                          // 5600-6000
+    {F5, 700},                                          // 6000-6700 sus4, back down
+    {G5, 400},                                          // 6700-7100
+    {G5, 900},                                          // 7100-8000 pivot back
+
+    // A' - restatement
+    {G5, 150},   {REST, 50},  {G5, 150},  {REST, 50},   // 8000-8400
+    {G5, 400},                                          // 8400-8800
+    {G5, 350},   {REST, 50},  {G5, 300},                // 8800-9500
+    {F5, 500},                                          // 9500-10000 last sus4
+    {G5, 600},                                          // 10000-10600 resolution
+    {G5, 1400},                                         // 10600-12000 final fifth
 };
 
 // ---------------------------------------------------------------------------
@@ -88,12 +135,32 @@ constexpr Note VOICE_FIFTH[] = {
 // out. Palette is C-D-F-G: no third, ever.
 // ---------------------------------------------------------------------------
 constexpr Note VOICE_MELODY[] = {
+    // A - statement
     {G5, 150},   {REST, 50},  {G5, 150},  {REST, 50},   // 0-400    pickup, unison with fifth
     {C6, 400},                                          // 400-800  leap to the octave
     {C6, 200},   {D6, 200},   {F6, 300},                // 800-1500 stepwise rise
     {G6, 600},                                          // 1500-2100 peak
     {F6, 250},   {REST, 50},  {G6, 250},  {REST, 50},   // 2100-2700 turn figure
-    {C7, 1300},                                         // 2700-4000 final, two octaves up
+    {C7, 1300},                                         // 2700-4000 first summit
+
+    // B - development. Falls from the summit down to the pedal and works back
+    // up, so the second summit in A' is earned rather than just repeated.
+    {G6, 150},   {REST, 50},  {G6, 150},  {REST, 50},   // 4000-4400 pickup, an octave up
+    {F6, 400},                                          // 4400-4800 descent begins
+    {D6, 200},   {C6, 200},                             // 4800-5200 down to the pedal
+    {D6, 200},   {F6, 200},                             // 5200-5600 answering rise
+    {G6, 400},                                          // 5600-6000
+    {F6, 300},   {REST, 50},  {D6, 300},  {REST, 50},   // 6000-6700 over the sus4
+    {C6, 200},   {D6, 200},                             // 6700-7100 lowest point
+    {F6, 450},   {G6, 450},                             // 7100-8000 run back up
+
+    // A' - restatement
+    {G5, 150},   {REST, 50},  {G5, 150},  {REST, 50},   // 8000-8400
+    {C6, 400},                                          // 8400-8800
+    {C6, 200},   {D6, 200},   {F6, 300},                // 8800-9500
+    {G6, 500},                                          // 9500-10000
+    {F6, 250},   {REST, 50},  {G6, 250},  {REST, 50},   // 10000-10600
+    {C7, 1400},                                         // 10600-12000 final, two octaves up
 };
 
 // Per-voice frequency multiplier, for tuning against real hardware.
