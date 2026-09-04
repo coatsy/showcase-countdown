@@ -115,6 +115,7 @@ The Grove light settings are optional and have defaults:
 | `LED_TYPE`             | `NEOPIXEL`   | GRB pixels; `NONE` disables the output     |
 | `LED_COUNT`            | `1`          | One or two pixels                          |
 | `LED_PIN`              | `32`         | GPIO 32 or GPIO 33                         |
+| `LED_BRIGHTNESS`       | `64`         | Per-channel white level from 1 to 255      |
 | `LOCAL_UTC_OFFSET`     | `+10:00`     | Fixed offset from UTC; no DST calculation  |
 | `LED_ON_TIME`          | `08:00`      | Local time to turn the pixels white        |
 | `LED_OFF_TIME`         | `18:00`      | Local time to turn the pixels off          |
@@ -140,7 +141,7 @@ pio device list
 pio run -e stick -t upload --upload-port COM3
 ```
 
-A clean build lands at roughly 960 KB of the 3 MB `huge_app` partition.
+A clean build lands at roughly 970 KB of the 3 MB `huge_app` partition.
 
 ### How the secrets get in
 
@@ -170,6 +171,12 @@ sync attempt when the countdown reaches 5 minutes.
 The automatic light schedule is applied at startup and at each on/off boundary.
 A double-click override therefore lasts until the next configured boundary:
 08:00 or 18:00 with the defaults.
+
+Run the deterministic schedule checks with:
+
+```sh
+python tests/test_light_schedule.py
+```
 
 ## Layout
 

@@ -12,6 +12,7 @@
 
 #include "env_config.h"
 #include "fanfare.h"
+#include "light_schedule.h"
 #include "voice_assign.h"
 
 #ifndef WIFI_SSID
@@ -203,25 +204,13 @@ bool lastScheduledLightsOn = false;
 // Grove lights
 // ---------------------------------------------------------------------------
 
-bool scheduledLightsOn(time_t now) {
-    time_t localNow = now + LOCAL_UTC_OFFSET_SECONDS;
-    struct tm local;
-    gmtime_r(&localNow, &local);
-    const int minuteOfDay = local.tm_hour * 60 + local.tm_min;
-
-    if (LED_ON_MINUTE_OF_DAY < LED_OFF_MINUTE_OF_DAY) {
-        return minuteOfDay >= LED_ON_MINUTE_OF_DAY && minuteOfDay < LED_OFF_MINUTE_OF_DAY;
-    }
-    return minuteOfDay >= LED_ON_MINUTE_OF_DAY || minuteOfDay < LED_OFF_MINUTE_OF_DAY;
-}
-
 void setLights(bool on, const char* source) {
     if (!LED_ENABLED) {
         return;
     }
 
     lightsOn = on;
-    const uint32_t colour = on ? lights.Color(255, 255, 255) : 0;
+    const uint32_t colour = on ? lights.Color(LED_BRIGHTNESS, LED_BRIGHTNESS, LED_BRIGHTNESS) : 0;
     for (uint16_t index = 0; index < LED_COUNT; ++index) {
         lights.setPixelColor(index, colour);
     }
@@ -234,7 +223,9 @@ void updateLightSchedule(time_t now) {
         return;
     }
 
-    const bool scheduledOn = scheduledLightsOn(now);
+    const bool scheduledOn = light_schedule::isOnAt(
+        static_cast<int64_t>(now), LOCAL_UTC_OFFSET_SECONDS, LED_ON_MINUTE_OF_DAY,
+        LED_OFF_MINUTE_OF_DAY);
     if (!lightScheduleInitialized || scheduledOn != lastScheduledLightsOn) {
         lightScheduleInitialized = true;
         lastScheduledLightsOn = scheduledOn;

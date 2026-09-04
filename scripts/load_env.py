@@ -31,6 +31,7 @@ DEFAULTS = {
     "LED_TYPE": '"NEOPIXEL"',
     "LED_COUNT": "1",
     "LED_PIN": "32",
+    "LED_BRIGHTNESS": "64",
     "LOCAL_UTC_OFFSET": '"+10:00"',
     "LED_ON_TIME": '"08:00"',
     "LED_OFF_TIME": '"18:00"',
@@ -64,6 +65,7 @@ _DERIVED_SETTINGS = {
     "LED_TYPE",
     "LED_COUNT",
     "LED_PIN",
+    "LED_BRIGHTNESS",
     "LOCAL_UTC_OFFSET",
     "LED_ON_TIME",
     "LED_OFF_TIME",
@@ -96,6 +98,17 @@ def integer_setting(entries, key, allowed):
         fail("%s=%r must be an integer" % (key, value))
     if parsed not in allowed:
         fail("%s=%r must be one of: %s" % (key, value, ", ".join(map(str, allowed))))
+    return parsed
+
+
+def integer_range_setting(entries, key, minimum, maximum):
+    value = setting_value(entries, key)
+    try:
+        parsed = int(value, 10)
+    except ValueError:
+        fail("%s=%r must be an integer" % (key, value))
+    if parsed < minimum or parsed > maximum:
+        fail("%s=%r must be between %d and %d" % (key, value, minimum, maximum))
     return parsed
 
 
@@ -186,6 +199,7 @@ def render(entries, epoch, parsed):
     led_enabled, pixel_order = _LED_TYPES[led_type]
     led_count = integer_setting(entries, "LED_COUNT", (1, 2))
     led_pin = integer_setting(entries, "LED_PIN", (32, 33))
+    led_brightness = integer_range_setting(entries, "LED_BRIGHTNESS", 1, 255)
     led_on_minute = minute_of_day(entries, "LED_ON_TIME")
     led_off_minute = minute_of_day(entries, "LED_OFF_TIME")
     if led_on_minute == led_off_minute:
@@ -213,6 +227,7 @@ def render(entries, epoch, parsed):
     lines.append("#define LED_TYPE_NAME %s" % c_string(led_type))
     lines.append("#define LED_COUNT %d" % led_count)
     lines.append("#define LED_PIN %d" % led_pin)
+    lines.append("#define LED_BRIGHTNESS %d" % led_brightness)
     lines.append("#define LED_PIXEL_TYPE (%s + NEO_KHZ800)" % pixel_order)
     lines.append("#define LOCAL_UTC_OFFSET_SECONDS %d" % utc_offset_seconds(entries))
     lines.append("#define LED_ON_MINUTE_OF_DAY %d" % led_on_minute)
