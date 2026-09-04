@@ -1,3 +1,4 @@
+#include <Adafruit_NeoPixel.h>
 #include <M5Unified.h>
 #include <WiFi.h>
 
@@ -192,6 +193,76 @@ bool preEventSyncAttempted = false;
 volatile bool ntpSyncReceived = false;
 bool fired = false;
 bool showDiagnostics = false;
+
+Adafruit_NeoPixel lights(LED_COUNT, LED_PIN, LED_PIXEL_TYPE);
+bool lightsOn = false;
+bool lightScheduleInitialized = false;
+bool lastScheduledLightsOn = false;
+
+// ---------------------------------------------------------------------------
+// Grove lights
+// ---------------------------------------------------------------------------
+
+bool scheduledLightsOn(time_t now) {
+    time_t localNow = now + LOCAL_UTC_OFFSET_SECONDS;
+    struct tm local;
+    gmtime_r(&localNow, &local);
+    const int minuteOfDay = local.tm_hour * 60 + local.tm_min;
+
+    if (LED_ON_MINUTE_OF_DAY < LED_OFF_MINUTE_OF_DAY) {
+        return minuteOfDay >= LED_ON_MINUTE_OF_DAY && minuteOfDay < LED_OFF_MINUTE_OF_DAY;
+    }
+    return minuteOfDay >= LED_ON_MINUTE_OF_DAY || minuteOfDay < LED_OFF_MINUTE_OF_DAY;
+}
+
+void setLights(bool on, const char* source) {
+    if (!LED_ENABLED) {
+        return;
+    }
+
+    lightsOn = on;
+    const uint32_t colour = on ? lights.Color(255, 255, 255) : 0;
+    for (uint16_t index = 0; index < LED_COUNT; ++index) {
+        lights.setPixelColor(index, colour);
+    }
+    lights.show();
+    Serial.printf("  leds    : %s (%s)\n", on ? "on" : "off", source);
+}
+
+void updateLightSchedule(time_t now) {
+    if (!LED_ENABLED || now <= SANE_EPOCH) {
+        return;
+    }
+
+    const bool scheduledOn = scheduledLightsOn(now);
+    if (!lightScheduleInitialized || scheduledOn != lastScheduledLightsOn) {
+        lightScheduleInitialized = true;
+        lastScheduledLightsOn = scheduledOn;
+        setLights(scheduledOn, "schedule");
+    }
+}
+
+void initializeLights() {
+    if (!LED_ENABLED) {
+        Serial.println("  leds    : disabled");
+        return;
+    }
+
+    lights.begin();
+    lights.clear();
+    lights.show();
+    Serial.printf("  leds    : %u x %s on GPIO %d\n", static_cast<unsigned>(LED_COUNT),
+                  LED_TYPE_NAME, LED_PIN);
+    updateLightSchedule(time(nullptr));
+}
+
+void toggleLights() {
+    if (!LED_ENABLED) {
+        Serial.println("  leds    : toggle ignored (disabled)");
+        return;
+    }
+    setLights(!lightsOn, "button");
+}
 
 // ---------------------------------------------------------------------------
 // Voice assignment
@@ -416,7 +487,7 @@ void renderMessage(const char* line1, const char* line2) {
 void renderDiagnostics() {
     M5.Display.fillScreen(TFT_BLACK);
     M5.Display.setFont(&fonts::Font2);
-    constexpr int DIAGNOSTIC_ROWS = 7;
+    constexpr int DIAGNOSTIC_ROWS = 8;
     if (2 + M5.Display.fontHeight() * DIAGNOSTIC_ROWS > layout.h) {
         M5.Display.setFont(&fonts::Font0);
     }
@@ -429,6 +500,7 @@ void renderDiagnostics() {
     M5.Display.printf("rtc   : %s\n", M5.Rtc.isEnabled() ? "yes" : "no");
     M5.Display.printf("ntp   : %s\n", timeVerified ? "synced" : "UNVERIFIED");
     M5.Display.printf("batt  : %d%%\n", M5.Power.getBatteryLevel());
+    M5.Display.printf("leds  : %s\n", LED_ENABLED ? (lightsOn ? "on" : "off") : "disabled");
     M5.Display.printf("panel : %dx%d\n", layout.w, layout.h);
 
     const time_t now = time(nullptr);
@@ -769,6 +841,7 @@ void setup() {
     if (M5.Rtc.isEnabled()) {
         M5.Rtc.setSystemTimeFromRtc();
     }
+    initializeLights();
 
     M5.update();
     if (M5.BtnA.isPressed()) {
@@ -798,7 +871,9 @@ void loop() {
         }
     }
 
-    if (M5.BtnA.wasPressed()) {
+    if (M5.BtnA.wasDoubleClicked()) {
+        toggleLights();
+    } else if (M5.BtnA.wasSingleClicked()) {
         renderMessage(EVENT_NAME, "syncing...");
         syncFromNtp();
     }
@@ -808,6 +883,7 @@ void loop() {
 
     const time_t now = time(nullptr);
     int64_t remaining = static_cast<int64_t>(EVENT_EPOCH_UTC) - static_cast<int64_t>(now);
+    updateLightSchedule(now);
 
     if (!fired && !preEventSyncAttempted && now > SANE_EPOCH &&
         remaining <= PRE_EVENT_SYNC_LEAD_S && remaining > FIRE_ARM_WINDOW_S) {

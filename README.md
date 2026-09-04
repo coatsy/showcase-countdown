@@ -36,6 +36,18 @@ Note that there are two speaker HATs in the M5Stack catalogue and they are
 [Speaker Hat](https://shop.m5stack.com/products/m5stickc-speaker-hat) is an
 analogue PAM8303 fed from the DAC pin, while SPK2 is I2S. Get SPK2.
 
+### About the Grove lights
+
+The Grove connector exposes 5 V, ground, GPIO 32 and GPIO 33. Connect the
+pixel's data-in wire to the configured GPIO (32 by default), power to 5 V, and
+ground to ground. One or two 800 kHz NeoPixel/WS2812-compatible RGB pixels are
+supported.
+
+NeoPixels powered at 5 V can be marginal with the ESP32's 3.3 V data signal.
+For a short lead this commonly works, but use a 3.3 V-to-5 V logic-level
+shifter if the pixels flicker or ignore updates. Two pixels at full white can
+draw about 120 mA, so account for them in the power budget.
+
 ### Device compatibility
 
 Target is the **StickC PLUS SE** (SKU K016-P-SE). The **StickC PLUS 1.1** is a
@@ -96,6 +108,22 @@ EVENT_NAME="[red]Westpac[/] + [#00A4EF]Microsoft[/] Hackathon|Doors open 6pm"
 The panel is RGB565, so colours are quantised to five bits per channel and brand
 hex values often read duller than the named equivalents.
 
+The Grove light settings are optional and have defaults:
+
+| Key                    | Default      | Notes                                      |
+|------------------------|--------------|--------------------------------------------|
+| `LED_TYPE`             | `NEOPIXEL`   | GRB pixels; `NONE` disables the output     |
+| `LED_COUNT`            | `1`          | One or two pixels                          |
+| `LED_PIN`              | `32`         | GPIO 32 or GPIO 33                         |
+| `LOCAL_UTC_OFFSET`     | `+10:00`     | Fixed offset from UTC; no DST calculation  |
+| `LED_ON_TIME`          | `08:00`      | Local time to turn the pixels white        |
+| `LED_OFF_TIME`         | `18:00`      | Local time to turn the pixels off          |
+
+Explicit colour-order variants such as `NEOPIXEL_RGB`, `NEOPIXEL_RBG`, and
+`NEOPIXEL_BGR` are available when a pixel does not use the usual GRB order.
+`WS2812` and `WS2812B` are aliases for the default GRB configuration. Changing
+these settings requires a rebuild and reflash.
+
 ### Build and flash
 
 ```sh
@@ -132,11 +160,16 @@ rebuild and a reflash**, not just an edit.
 
 | Action | Effect |
 | --- | --- |
-| **A** | Force an NTP re-sync |
+| **A, single click** | Force an NTP re-sync |
+| **A, double click** | Toggle the Grove lights on or off |
 | **B** | Toggle the diagnostics screen |
 
 The device also re-syncs automatically every 6 hours and makes one additional
 sync attempt when the countdown reaches 5 minutes.
+
+The automatic light schedule is applied at startup and at each on/off boundary.
+A double-click override therefore lasts until the next configured boundary:
+08:00 or 18:00 with the defaults.
 
 ## Layout
 

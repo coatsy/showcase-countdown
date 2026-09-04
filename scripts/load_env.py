@@ -28,6 +28,12 @@ DEFAULTS = {
     "NTP_SERVER_2": '"1.pool.ntp.org"',
     "NTP_SERVER_3": '"2.pool.ntp.org"',
     "BRIGHTNESS": "80",
+    "LED_TYPE": '"NEOPIXEL"',
+    "LED_COUNT": "1",
+    "LED_PIN": "32",
+    "LOCAL_UTC_OFFSET": '"+10:00"',
+    "LED_ON_TIME": '"08:00"',
+    "LED_OFF_TIME": '"18:00"',
     "TITLE_DWELL_MS": "5000",
     "TITLE_GAP_MS": "300",
 }
@@ -38,6 +44,30 @@ _NUMERIC = re.compile(r"^[+-]?(?:\d+|\d*\.\d+)$")
 # Colour markup such as [red] / [#FF0000] / [/]. Stripped for the plain-text
 # EVENT_NAME, kept intact in EVENT_TITLES where it is rendered.
 _MARKUP = re.compile(r"\[(?:/|#[0-9A-Fa-f]{6}|[A-Za-z]+)\]")
+_UTC_OFFSET = re.compile(r"^(?:UTC)?([+-])(\d{1,2})(?::([0-5]\d))?$", re.IGNORECASE)
+_CLOCK_TIME = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
+
+_LED_TYPES = {
+    "NONE": (0, "NEO_GRB"),
+    "NEOPIXEL": (1, "NEO_GRB"),
+    "NEOPIXEL_RGB": (1, "NEO_RGB"),
+    "NEOPIXEL_RBG": (1, "NEO_RBG"),
+    "NEOPIXEL_GRB": (1, "NEO_GRB"),
+    "NEOPIXEL_GBR": (1, "NEO_GBR"),
+    "NEOPIXEL_BRG": (1, "NEO_BRG"),
+    "NEOPIXEL_BGR": (1, "NEO_BGR"),
+    "WS2812": (1, "NEO_GRB"),
+    "WS2812B": (1, "NEO_GRB"),
+}
+
+_DERIVED_SETTINGS = {
+    "LED_TYPE",
+    "LED_COUNT",
+    "LED_PIN",
+    "LOCAL_UTC_OFFSET",
+    "LED_ON_TIME",
+    "LED_OFF_TIME",
+}
 
 
 def strip_markup(text):
@@ -47,6 +77,48 @@ def strip_markup(text):
 def fail(message):
     sys.stderr.write("\nload_env: %s\n\n" % message)
     env.Exit(1)  # noqa: F821
+
+
+def setting_value(entries, key):
+    if key in entries:
+        return entries[key][0]
+    raw = DEFAULTS[key]
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        return raw[1:-1]
+    return raw
+
+
+def integer_setting(entries, key, allowed):
+    value = setting_value(entries, key)
+    try:
+        parsed = int(value, 10)
+    except ValueError:
+        fail("%s=%r must be an integer" % (key, value))
+    if parsed not in allowed:
+        fail("%s=%r must be one of: %s" % (key, value, ", ".join(map(str, allowed))))
+    return parsed
+
+
+def utc_offset_seconds(entries):
+    value = setting_value(entries, "LOCAL_UTC_OFFSET")
+    match = _UTC_OFFSET.fullmatch(value)
+    if not match:
+        fail("LOCAL_UTC_OFFSET=%r must look like +10:00, -05:00, or UTC+10" % value)
+    sign, hours_text, minutes_text = match.groups()
+    hours = int(hours_text)
+    minutes = int(minutes_text or "0")
+    if hours > 14 or (hours == 14 and minutes):
+        fail("LOCAL_UTC_OFFSET=%r is outside the supported UTC-14:00 to UTC+14:00 range" % value)
+    seconds = (hours * 60 + minutes) * 60
+    return -seconds if sign == "-" else seconds
+
+
+def minute_of_day(entries, key):
+    value = setting_value(entries, key)
+    match = _CLOCK_TIME.fullmatch(value)
+    if not match:
+        fail("%s=%r must use 24-hour HH:MM format" % (key, value))
+    return int(match.group(1)) * 60 + int(match.group(2))
 
 
 def parse_env_file(path):
@@ -108,6 +180,17 @@ def literal(value, quoted):
 
 
 def render(entries, epoch, parsed):
+    led_type = setting_value(entries, "LED_TYPE").upper()
+    if led_type not in _LED_TYPES:
+        fail("LED_TYPE=%r must be one of: %s" % (led_type, ", ".join(sorted(_LED_TYPES))))
+    led_enabled, pixel_order = _LED_TYPES[led_type]
+    led_count = integer_setting(entries, "LED_COUNT", (1, 2))
+    led_pin = integer_setting(entries, "LED_PIN", (32, 33))
+    led_on_minute = minute_of_day(entries, "LED_ON_TIME")
+    led_off_minute = minute_of_day(entries, "LED_OFF_TIME")
+    if led_on_minute == led_off_minute:
+        fail("LED_ON_TIME and LED_OFF_TIME must differ")
+
     lines = [
         "// AUTO-GENERATED from .env by scripts/load_env.py. Do not edit, do not commit.",
         "#pragma once",
@@ -126,14 +209,23 @@ def render(entries, epoch, parsed):
     lines.append("#define EVENT_TITLE_COUNT %d" % len(titles))
     lines.append("#define EVENT_TITLES {%s}" % ", ".join(c_string(t) for t in titles))
     lines.append("")
+    lines.append("#define LED_ENABLED %d" % led_enabled)
+    lines.append("#define LED_TYPE_NAME %s" % c_string(led_type))
+    lines.append("#define LED_COUNT %d" % led_count)
+    lines.append("#define LED_PIN %d" % led_pin)
+    lines.append("#define LED_PIXEL_TYPE (%s + NEO_KHZ800)" % pixel_order)
+    lines.append("#define LOCAL_UTC_OFFSET_SECONDS %d" % utc_offset_seconds(entries))
+    lines.append("#define LED_ON_MINUTE_OF_DAY %d" % led_on_minute)
+    lines.append("#define LED_OFF_MINUTE_OF_DAY %d" % led_off_minute)
+    lines.append("")
 
     for key in sorted(entries):
-        if key in ("EVENT_DATETIME", "EVENT_NAME"):
+        if key in ("EVENT_DATETIME", "EVENT_NAME") or key in _DERIVED_SETTINGS:
             continue
         value, quoted = entries[key]
         lines.append("#define %s %s" % (key, literal(value, quoted)))
     for key, value in sorted(DEFAULTS.items()):
-        if key not in entries:
+        if key not in entries and key not in _DERIVED_SETTINGS:
             lines.append("#define %s %s" % (key, value))
     lines.append("")
     return "\n".join(lines)
