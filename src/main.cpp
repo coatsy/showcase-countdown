@@ -1,6 +1,12 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 
+#if __has_include(<esp_sntp.h>)
+#include <esp_sntp.h>
+#elif __has_include(<sntp.h>)
+#include <sntp.h>
+#endif
+
 #include <string.h>
 
 #include "env_config.h"
@@ -16,6 +22,7 @@ namespace {
 constexpr uint32_t WIFI_TIMEOUT_MS = 10000;
 constexpr uint32_t NTP_TIMEOUT_MS = 15000;
 constexpr uint32_t RESYNC_INTERVAL_MS = 6UL * 60 * 60 * 1000;  // requirement 3
+constexpr int64_t PRE_EVENT_SYNC_LEAD_S = 5 * 60;
 
 // Any real sync lands far past this; an unset clock starts at 0. Comparing the
 // wall clock is more robust than sntp_get_sync_status(), whose return values
@@ -181,6 +188,8 @@ M5Canvas& sprite() {
 uint8_t voiceIndex = 0;
 bool timeVerified = false;
 uint32_t lastSyncMs = 0;
+bool preEventSyncAttempted = false;
+volatile bool ntpSyncReceived = false;
 bool fired = false;
 bool showDiagnostics = false;
 
@@ -406,7 +415,11 @@ void renderMessage(const char* line1, const char* line2) {
 
 void renderDiagnostics() {
     M5.Display.fillScreen(TFT_BLACK);
-    M5.Display.setFont(layout.labelFont);
+    M5.Display.setFont(&fonts::Font2);
+    constexpr int DIAGNOSTIC_ROWS = 7;
+    if (2 + M5.Display.fontHeight() * DIAGNOSTIC_ROWS > layout.h) {
+        M5.Display.setFont(&fonts::Font0);
+    }
     M5.Display.setTextDatum(top_left);
     M5.Display.setTextColor(TFT_WHITE);
     M5.Display.setCursor(2, 2);
@@ -617,6 +630,10 @@ void driveTest() {
 // Time
 // ---------------------------------------------------------------------------
 
+void onNtpSync(struct timeval*) {
+    ntpSyncReceived = true;
+}
+
 bool syncFromNtp() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -642,11 +659,13 @@ bool syncFromNtp() {
         // Start SNTP only once the link is up. Started any earlier, the first
         // request fails DNS and lwip then backs off for CONFIG_LWIP_SNTP_UPDATE_DELAY
         // - one hour by default - so no wait here would ever see a sync.
+        ntpSyncReceived = false;
+        sntp_set_time_sync_notification_cb(onNtpSync);
         configTzTime("UTC0", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
 
         const uint32_t ntpDeadline = millis() + NTP_TIMEOUT_MS;
         while (millis() < ntpDeadline) {
-            if (time(nullptr) > SANE_EPOCH) {
+            if (ntpSyncReceived && time(nullptr) > SANE_EPOCH) {
                 ok = true;
                 break;
             }
@@ -787,11 +806,19 @@ void loop() {
         showDiagnostics = !showDiagnostics;
     }
 
-    if (!fired && timeVerified && millis() - lastSyncMs >= RESYNC_INTERVAL_MS) {
-        syncFromNtp();
-    }
+    const time_t now = time(nullptr);
+    int64_t remaining = static_cast<int64_t>(EVENT_EPOCH_UTC) - static_cast<int64_t>(now);
 
-    const int64_t remaining = static_cast<int64_t>(EVENT_EPOCH_UTC) - static_cast<int64_t>(time(nullptr));
+    if (!fired && !preEventSyncAttempted && now > SANE_EPOCH &&
+        remaining <= PRE_EVENT_SYNC_LEAD_S && remaining > FIRE_ARM_WINDOW_S) {
+        preEventSyncAttempted = true;
+        renderMessage(EVENT_NAME, "final sync...");
+        syncFromNtp();
+        remaining = static_cast<int64_t>(EVENT_EPOCH_UTC) - static_cast<int64_t>(time(nullptr));
+    } else if (!fired && timeVerified && millis() - lastSyncMs >= RESYNC_INTERVAL_MS) {
+        syncFromNtp();
+        remaining = static_cast<int64_t>(EVENT_EPOCH_UTC) - static_cast<int64_t>(time(nullptr));
+    }
 
     if (!fired && remaining <= FIRE_ARM_WINDOW_S) {
         waitForFireInstant();

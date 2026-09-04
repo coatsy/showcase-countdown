@@ -1,4 +1,7 @@
-# showcase-countdown
+---
+title: showcase-countdown
+description: Build and configure an NTP-synchronized M5StickC event countdown
+---
 
 A countdown timer for the M5StickC PLUS SE. Each unit shows an event name and
 the time remaining, and disciplines its RTC from NTP so that a shelf full of
@@ -132,7 +135,8 @@ rebuild and a reflash**, not just an edit.
 | **A** | Force an NTP re-sync |
 | **B** | Toggle the diagnostics screen |
 
-The device also re-syncs automatically every 6 hours.
+The device also re-syncs automatically every 6 hours and makes one additional
+sync attempt when the countdown reaches 5 minutes.
 
 ## Layout
 
