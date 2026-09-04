@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Finished M5StickC PLUS SE and NeoPixel assembly</title>
+  <desc id="description">An orange M5StickC PLUS SE connected by a Grove cable to a protected level-shifter board and two white addressable pixels.</desc>
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#263238" flood-opacity="0.24"/>
+    </filter>
+    <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#263238" flood-opacity="0.20"/>
+    </filter>
+    <filter id="glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="bench-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#d8dee2" stroke-width="1"/>
+    </pattern>
+    <style>
+      .title { font: 700 34px 'Segoe UI', sans-serif; fill: #17212b; }
+      .subtitle { font: 17px 'Segoe UI', sans-serif; fill: #53616d; }
+      .heading { font: 700 20px 'Segoe UI', sans-serif; fill: #17212b; }
+      .label { font: 16px 'Segoe UI', sans-serif; fill: #24313b; }
+      .small { font: 14px 'Segoe UI', sans-serif; fill: #53616d; }
+      .tiny { font: 12px 'Segoe UI', sans-serif; fill: #6a7781; }
+      .callout { fill: #ffffff; stroke: #aab5bd; stroke-width: 2; }
+      .leader { fill: none; stroke: #667680; stroke-width: 2; stroke-dasharray: 7 6; }
+      .pcb { fill: #286c55; stroke: #174f3d; stroke-width: 3; }
+      .pad { fill: #d6aa36; stroke: #a97c12; stroke-width: 2; }
+      .trace { fill: none; stroke: #d6aa36; stroke-width: 3; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#edf1f3"/>
+  <rect x="32" y="105" width="1536" height="730" rx="20" fill="url(#bench-grid)" stroke="#c6cfd5" stroke-width="2"/>
+  <text x="65" y="56" class="title">Finished Grove pixel assembly</text>
+  <text x="65" y="83" class="subtitle">Illustrative layout, not to scale; two pixels shown, second pixel optional</text>
+
+  <!-- M5StickC PLUS SE, landscape orientation -->
+  <g filter="url(#shadow)">
+    <rect x="90" y="245" width="570" height="300" rx="54" fill="#dc461d" stroke="#9c2c10" stroke-width="4"/>
+    <rect x="105" y="260" width="540" height="270" rx="44" fill="#ff6a2f" fill-opacity="0.82" stroke="#ff9b70" stroke-width="3"/>
+    <path d="M 118 298 H 625 M 118 500 H 625" stroke="#a82f13" stroke-width="3" opacity="0.38"/>
+    <rect x="150" y="285" width="350" height="205" rx="10" fill="#101820" stroke="#303c46" stroke-width="6"/>
+    <rect x="168" y="303" width="314" height="169" rx="4" fill="#071015"/>
+    <text x="325" y="337" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="19" font-weight="700" fill="#ffffff">HACK SHOWCASE</text>
+    <line x1="185" y1="352" x2="465" y2="352" stroke="#66757e" stroke-width="2"/>
+    <text x="245" y="420" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="56" font-weight="700" fill="#ffffff">12</text>
+    <text x="405" y="420" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="56" font-weight="700" fill="#ffffff">07</text>
+    <text x="245" y="449" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#62d6e8">DAYS</text>
+    <text x="405" y="449" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="17" font-weight="700" fill="#62d6e8">HRS</text>
+    <rect x="527" y="285" width="92" height="205" rx="18" fill="#ed5a26" fill-opacity="0.55" stroke="#bc3b15" stroke-width="2"/>
+    <circle cx="573" cy="344" r="25" fill="#e97b52" stroke="#993213" stroke-width="3"/>
+    <path d="M 558 344 H 588 M 573 329 V 359" stroke="#ffb295" stroke-width="5" stroke-linecap="round"/>
+    <text x="573" y="390" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#65210d">BUTTON A</text>
+    <circle cx="573" cy="442" r="9" fill="#99260b"/>
+
+    <!-- Grove and USB-C sockets on the short end -->
+    <path d="M 645 307 h 36 q 15 0 15 15 v 68 q 0 15 -15 15 h -36 z" fill="#f5f6f4" stroke="#b9c0c4" stroke-width="3"/>
+    <rect x="662" y="321" width="27" height="70" rx="5" fill="#c8ced1"/>
+    <rect x="669" y="329" width="13" height="54" rx="3" fill="#39434a"/>
+    <circle cx="675.5" cy="338" r="2.5" fill="#e3b83f"/>
+    <circle cx="675.5" cy="350" r="2.5" fill="#e3b83f"/>
+    <circle cx="675.5" cy="362" r="2.5" fill="#e3b83f"/>
+    <circle cx="675.5" cy="374" r="2.5" fill="#e3b83f"/>
+    <rect x="652" y="427" width="42" height="26" rx="10" fill="#252d32" stroke="#aeb7bc" stroke-width="3"/>
+    <rect x="659" y="433" width="28" height="14" rx="6" fill="#0b1013"/>
+  </g>
+  <text x="375" y="580" text-anchor="middle" class="heading">M5StickC PLUS SE</text>
+  <text x="375" y="605" text-anchor="middle" class="small">shown in the firmware's landscape orientation</text>
+
+  <!-- Grove cable sheath and four coloured conductors -->
+  <path d="M 694 354 C 735 354, 740 410, 770 450 C 804 496, 825 535, 875 566" fill="none" stroke="#737f86" stroke-width="30" stroke-linecap="round" opacity="0.28"/>
+  <path d="M 694 344 C 750 354, 752 420, 790 464 C 820 500, 842 531, 884 551" fill="none" stroke="#e0a91a" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 694 352 C 744 362, 746 426, 781 470 C 812 509, 834 540, 880 562" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 694 352 C 744 362, 746 426, 781 470 C 812 509, 834 540, 880 562" fill="none" stroke="#9da9af" stroke-width="2" stroke-linecap="round"/>
+  <path d="M 694 360 C 737 371, 741 434, 774 477 C 803 516, 825 548, 876 574" fill="none" stroke="#cf3030" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 694 368 C 731 381, 736 443, 766 485 C 794 525, 816 557, 872 586" fill="none" stroke="#252b2f" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Level shifter board under clear heat-shrink -->
+  <g filter="url(#soft-shadow)">
+    <rect x="830" y="500" width="340" height="235" rx="24" fill="#dce8ea" fill-opacity="0.70" stroke="#80949d" stroke-width="3"/>
+    <rect x="850" y="520" width="300" height="195" rx="12" class="pcb"/>
+    <circle cx="875" cy="552" r="9" class="pad"/>
+    <circle cx="875" cy="583" r="9" class="pad"/>
+    <circle cx="875" cy="614" r="9" class="pad"/>
+    <circle cx="875" cy="645" r="9" class="pad"/>
+    <path d="M 884 583 H 945 M 884 614 H 920 M 884 645 H 930" class="trace"/>
+    <rect x="936" y="555" width="118" height="84" rx="6" fill="#20262a" stroke="#0d1113" stroke-width="3"/>
+    <circle cx="952" cy="571" r="5" fill="#87939a"/>
+    <text x="995" y="591" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#f6f7f8">74AHCT125</text>
+    <text x="995" y="614" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#bdc8cd">level shifter</text>
+    <g stroke="#d8dde0" stroke-width="5">
+      <line x1="950" y1="548" x2="950" y2="537"/><line x1="974" y1="548" x2="974" y2="537"/><line x1="998" y1="548" x2="998" y2="537"/><line x1="1022" y1="548" x2="1022" y2="537"/><line x1="1046" y1="548" x2="1046" y2="537"/>
+      <line x1="950" y1="646" x2="950" y2="657"/><line x1="974" y1="646" x2="974" y2="657"/><line x1="998" y1="646" x2="998" y2="657"/><line x1="1022" y1="646" x2="1022" y2="657"/><line x1="1046" y1="646" x2="1046" y2="657"/>
+    </g>
+    <ellipse cx="1100" cy="578" rx="27" ry="46" fill="#255b91" stroke="#173f69" stroke-width="3"/>
+    <rect x="1073" y="566" width="54" height="36" fill="#3575b2"/>
+    <text x="1100" y="582" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" font-weight="700" fill="#ffffff">1000</text>
+    <text x="1100" y="595" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="10" fill="#ffffff">uF</text>
+    <rect x="1048" y="677" width="55" height="10" rx="3" fill="#d8b26a" stroke="#8f6a25" stroke-width="2"/>
+    <path d="M 1057 677 V 687 M 1067 677 V 687 M 1077 677 V 687 M 1087 677 V 687 M 1097 677 V 687" stroke="#9c3e2a" stroke-width="3"/>
+    <text x="1000" y="701" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#dce9e3">330 ohm + decoupling</text>
+    <circle cx="1125" cy="552" r="9" class="pad"/>
+    <circle cx="1125" cy="583" r="9" class="pad"/>
+    <circle cx="1125" cy="614" r="9" class="pad"/>
+    <path d="M 1054 583 H 1116 M 1054 614 H 1116" class="trace"/>
+  </g>
+  <text x="1000" y="773" text-anchor="middle" class="heading">Level shifter + protection board</text>
+  <text x="1000" y="798" text-anchor="middle" class="small">soldered, insulated, and strain-relieved</text>
+
+  <!-- Output cable from board to pixels -->
+  <path d="M 1135 552 C 1190 532, 1196 422, 1245 390" fill="none" stroke="#cf3030" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 1135 583 C 1200 561, 1212 455, 1250 415" fill="none" stroke="#2c78b8" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 1135 614 C 1205 594, 1222 490, 1255 440" fill="none" stroke="#252b2f" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- Pixel mounting bar -->
+  <g filter="url(#shadow)">
+    <rect x="1210" y="215" width="330" height="295" rx="26" fill="#323c42" stroke="#1e262a" stroke-width="4"/>
+    <circle cx="1240" cy="245" r="9" fill="#eef1f3" stroke="#161c1f" stroke-width="3"/>
+    <circle cx="1510" cy="245" r="9" fill="#eef1f3" stroke="#161c1f" stroke-width="3"/>
+    <circle cx="1240" cy="480" r="9" fill="#eef1f3" stroke="#161c1f" stroke-width="3"/>
+    <circle cx="1510" cy="480" r="9" fill="#eef1f3" stroke="#161c1f" stroke-width="3"/>
+
+    <rect x="1250" y="275" width="120" height="150" rx="12" class="pcb"/>
+    <circle cx="1268" cy="294" r="6" fill="#20292d"/>
+    <circle cx="1352" cy="294" r="6" fill="#20292d"/>
+    <circle cx="1268" cy="406" r="6" fill="#20292d"/>
+    <circle cx="1352" cy="406" r="6" fill="#20292d"/>
+    <rect x="1280" y="315" width="60" height="60" rx="8" fill="#fffdeb" stroke="#d9d4b7" stroke-width="3" filter="url(#glow)"/>
+    <rect x="1291" y="326" width="38" height="38" rx="5" fill="#ffffff"/>
+    <text x="1310" y="401" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="13" font-weight="700" fill="#d9f0e7">PIXEL 1</text>
+
+    <rect x="1380" y="275" width="120" height="150" rx="12" fill="#286c55" fill-opacity="0.62" stroke="#8ca39a" stroke-width="3" stroke-dasharray="8 6"/>
+    <circle cx="1398" cy="294" r="6" fill="#20292d"/>
+    <circle cx="1482" cy="294" r="6" fill="#20292d"/>
+    <circle cx="1398" cy="406" r="6" fill="#20292d"/>
+    <circle cx="1482" cy="406" r="6" fill="#20292d"/>
+    <rect x="1410" y="315" width="60" height="60" rx="8" fill="#fffdeb" stroke="#d9d4b7" stroke-width="3" filter="url(#glow)"/>
+    <rect x="1421" y="326" width="38" height="38" rx="5" fill="#ffffff"/>
+    <text x="1440" y="397" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" font-weight="700" fill="#e7f2ee">PIXEL 2</text>
+    <text x="1440" y="414" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#e7f2ee">OPTIONAL</text>
+
+    <path d="M 1370 330 C 1376 330, 1377 330, 1380 330" stroke="#cf3030" stroke-width="5"/>
+    <path d="M 1370 345 C 1376 345, 1377 345, 1380 345" stroke="#2c78b8" stroke-width="5"/>
+    <path d="M 1370 360 C 1376 360, 1377 360, 1380 360" stroke="#161c1f" stroke-width="5"/>
+  </g>
+  <text x="1375" y="548" text-anchor="middle" class="heading">One or two pixel modules</text>
+  <text x="1375" y="573" text-anchor="middle" class="small">mount with light facing the room</text>
+
+  <!-- Callouts -->
+  <rect x="710" y="135" width="310" height="78" rx="10" class="callout"/>
+  <text x="730" y="166" class="heading">Four-wire Grove lead</text>
+  <text x="730" y="191" class="small">white=data, red=5 V, black=ground</text>
+  <path d="M 820 213 C 790 255, 764 310, 750 386" class="leader"/>
+
+  <rect x="1070" y="115" width="390" height="78" rx="10" class="callout"/>
+  <text x="1090" y="146" class="heading">Diffused white output</text>
+  <text x="1090" y="171" class="small">default brightness 64/255; configurable in .env</text>
+  <path d="M 1330 193 C 1320 225, 1315 250, 1312 298" class="leader"/>
+
+  <rect x="70" y="690" width="650" height="105" rx="12" fill="#fff8df" stroke="#b68a18" stroke-width="2"/>
+  <text x="95" y="725" class="heading">What is enclosed</text>
+  <text x="95" y="752" class="label">The small board carries U1, the 330 ohm data resistor,</text>
+  <text x="95" y="777" class="label">bulk capacitor, and local decoupling from the schematic.</text>
+
+  <text x="1530" y="865" text-anchor="end" class="tiny">Assembly concept based on the M5StickC PLUS SE physical connector layout</text>
+</svg>

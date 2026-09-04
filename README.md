@@ -43,6 +43,10 @@ pixel's data-in wire to the configured GPIO (32 by default), power to 5 V, and
 ground to ground. One or two 800 kHz NeoPixel/WS2812-compatible RGB pixels are
 supported.
 
+See the [Grove-to-NeoPixel schematic](docs/grove-neopixel-schematic.md) for the
+connector pin numbers, cable colours, level shifter, protection resistor,
+decoupling, and second-pixel wiring.
+
 NeoPixels powered at 5 V can be marginal with the ESP32's 3.3 V data signal.
 For a short lead this commonly works, but use a 3.3 V-to-5 V logic-level
 shifter if the pixels flicker or ignore updates. Two pixels at full white can
