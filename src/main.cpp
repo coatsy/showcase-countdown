@@ -479,6 +479,7 @@ struct LedOverride {
     uint32_t startMs;
     uint32_t untilMs;
     uint32_t lastShown;
+    uint32_t lastFrame;
 };
 LedOverride ledOverride = {};
 
@@ -492,6 +493,83 @@ uint32_t scaleColor(uint32_t color, uint8_t level) {
 void showColor(uint32_t color) {
     for (uint16_t index = 0; index < LED_COUNT; ++index) {
         lights.setPixelColor(index, color);
+    }
+    lights.show();
+}
+
+// Animated modes paint each pixel separately, so they are throttled per frame
+// instead of by the single-colour comparison the uniform modes rely on.
+constexpr uint32_t LED_FRAME_MS = 20;
+
+// Red through violet spans roughly 280 degrees of the 16-bit hue wheel.
+constexpr uint32_t LED_HUE_VIOLET = 51000;
+
+bool isAnimatedMode(messaging::LedMode mode) {
+    switch (mode) {
+        case messaging::LedMode::Snake:
+        case messaging::LedMode::Ping:
+        case messaging::LedMode::Rainbow:
+        case messaging::LedMode::RollingRainbow:
+            return true;
+        default:
+            return false;
+    }
+}
+
+uint16_t rainbowHue(uint16_t index) {
+    const uint16_t count = LED_COUNT;
+    // Guarding the divisor keeps a single-pixel strip from dividing by zero.
+    const uint16_t span = count > 1 ? static_cast<uint16_t>(count - 1) : 1;
+    return static_cast<uint16_t>(static_cast<uint32_t>(index) * LED_HUE_VIOLET / span);
+}
+
+void paintAnimatedFrame(uint32_t elapsed) {
+    const uint16_t count = LED_COUNT;
+    const uint32_t period = ledOverride.periodMs;
+
+    switch (ledOverride.mode) {
+        case messaging::LedMode::Snake: {
+            // One lap per period, each pixel behind the head halving in brightness.
+            const uint32_t stepMs = period / count > 0 ? period / count : 1;
+            const uint16_t head = static_cast<uint16_t>((elapsed / stepMs) % count);
+            for (uint16_t i = 0; i < count; ++i) {
+                const uint16_t behind = static_cast<uint16_t>((head + count - i) % count);
+                const uint8_t level = behind < 8 ? static_cast<uint8_t>(255u >> behind) : 0;
+                lights.setPixelColor(i, scaleColor(ledOverride.color, level));
+            }
+            break;
+        }
+        case messaging::LedMode::Ping: {
+            // One out-and-back trip per period, without repeating either end.
+            const uint16_t span = count > 1 ? static_cast<uint16_t>((count - 1) * 2) : 1;
+            const uint32_t stepMs = period / span > 0 ? period / span : 1;
+            const uint32_t step = (elapsed / stepMs) % span;
+            const uint16_t pos = step < count ? static_cast<uint16_t>(step)
+                                             : static_cast<uint16_t>(span - step);
+            for (uint16_t i = 0; i < count; ++i) {
+                lights.setPixelColor(i, i == pos ? ledOverride.color : 0);
+            }
+            break;
+        }
+        case messaging::LedMode::Rainbow: {
+            for (uint16_t i = 0; i < count; ++i) {
+                lights.setPixelColor(
+                    i, lights.gamma32(lights.ColorHSV(rainbowHue(i), 255, LED_BRIGHTNESS)));
+            }
+            break;
+        }
+        case messaging::LedMode::RollingRainbow: {
+            // Hue wraps on the 16-bit wheel, so the rotation has no visible seam.
+            const uint32_t phase =
+                static_cast<uint32_t>((static_cast<uint64_t>(elapsed % period) * 65536) / period);
+            for (uint16_t i = 0; i < count; ++i) {
+                const uint16_t hue = static_cast<uint16_t>((rainbowHue(i) + phase) & 0xFFFF);
+                lights.setPixelColor(i, lights.gamma32(lights.ColorHSV(hue, 255, LED_BRIGHTNESS)));
+            }
+            break;
+        }
+        default:
+            break;
     }
     lights.show();
 }
@@ -512,9 +590,30 @@ void onLedCommand(const messaging::Led& l) {
     ledOverride.startMs = millis();
     ledOverride.untilMs = ledOverride.startMs + l.ttlMs;
     ledOverride.lastShown = 0xFFFFFFFF;
+    ledOverride.lastFrame = 0xFFFFFFFF;
     Serial.printf("  led     : #%06lX mode=%u period=%u ttl=%lu ms\n",
                   static_cast<unsigned long>(l.color), static_cast<unsigned>(l.mode),
                   static_cast<unsigned>(l.periodMs), static_cast<unsigned long>(l.ttlMs));
+}
+
+// Drives the animations through the same path an MQTT command takes, so a
+// stick with no broker can still be checked on the bench.
+void nextLedAnimation() {
+    static const messaging::LedMode MODES[] = {
+        messaging::LedMode::Snake, messaging::LedMode::Ping, messaging::LedMode::Rainbow,
+        messaging::LedMode::RollingRainbow};
+    static const char* NAMES[] = {"snake", "ping", "rainbow", "rolling_rainbow"};
+    constexpr uint8_t COUNT = sizeof(MODES) / sizeof(MODES[0]);
+    static uint8_t index = 0;
+
+    messaging::Led l = {};
+    l.color = 0x00A4EF;
+    l.mode = MODES[index];
+    l.periodMs = 2000;
+    l.ttlMs = 15000;
+    Serial.printf("  led     : %s demo\n", NAMES[index]);
+    index = static_cast<uint8_t>((index + 1) % COUNT);
+    onLedCommand(l);
 }
 
 void serviceLedOverride() {
@@ -528,6 +627,14 @@ void serviceLedOverride() {
         return;
     }
     const uint32_t elapsed = now - ledOverride.startMs;
+    if (isAnimatedMode(ledOverride.mode)) {
+        const uint32_t frame = elapsed / LED_FRAME_MS;
+        if (frame != ledOverride.lastFrame) {
+            ledOverride.lastFrame = frame;
+            paintAnimatedFrame(elapsed);
+        }
+        return;
+    }
     const uint32_t period = ledOverride.periodMs;
     uint32_t color = ledOverride.color;
     switch (ledOverride.mode) {
@@ -569,6 +676,46 @@ void onConfigCommand(const messaging::Config& c) {
                   static_cast<unsigned>(c.brightness), roomLocked ? "yes" : "no");
 }
 
+uint32_t parseSolidColorValue(const String& value) {
+    String text = value;
+    text.trim();
+    if (text.length() == 0) {
+        return 0xFFFFFF;
+    }
+    if (text.startsWith("#")) {
+        text = text.substring(1);
+    }
+    if (text.length() == 6) {
+        uint32_t rgb = 0;
+        for (size_t i = 0; i < 6; ++i) {
+            const int nibble = hexDigit(text.charAt(i));
+            if (nibble < 0) {
+                return 0xFFFFFF;
+            }
+            rgb = (rgb << 4) | static_cast<uint32_t>(nibble);
+        }
+        return rgb;
+    }
+
+    static const struct {
+        const char* name;
+        uint32_t value;
+    } names[] = {
+        {"black", 0x000000}, {"off", 0x000000}, {"red", 0xFF0000}, {"green", 0x00FF00},
+        {"blue", 0x0000FF}, {"yellow", 0xFFFF00}, {"cyan", 0x00FFFF}, {"magenta", 0xFF00FF},
+        {"white", 0xFFFFFF}, {"orange", 0xFFA500}, {"grey", 0x808080}, {"gray", 0x808080},
+        {"skyblue", 0x87CEEB}, {"pink", 0xFFC0CB},
+    };
+
+    const String lower = text;  // keep it simple; serial input is short
+    for (const auto& candidate : names) {
+        if (strcasecmp(lower.c_str(), candidate.name) == 0) {
+            return candidate.value;
+        }
+    }
+    return 0xFFFFFF;
+}
+
 void printSerialHelp() {
     Serial.println("serial commands:");
     Serial.println("  ?  show this help menu");
@@ -582,6 +729,8 @@ void printSerialHelp() {
     Serial.println("  t  run the speaker tone sweep");
     Serial.println("  m  run the speaker drive test");
     Serial.println("  l  toggle the Grove lights");
+    Serial.println("  c  set all LEDs to a hex or named colour (e.g. #00A4EF, red, blue)");
+    Serial.println("  n  cycle the LED animations (snake, ping, rainbow, rolling)");
     Serial.println("  j  play the 'tada' jingle through the sequencer");
     Serial.println("  w  forget the stored Wi-Fi credentials");
     Serial.println("  x  reset settings to the built-in defaults");
@@ -644,6 +793,30 @@ void handleMachineCommand(const String& line) {
         return;
     }
 
+    if (verb == "led" || verb == "color" || verb == "colour") {
+        const String text = arg;
+        const uint32_t rgb = parseSolidColorValue(text);
+        if (rgb == 0xFFFFFF && text.length() > 0 && !text.equalsIgnoreCase("white") &&
+            !text.equalsIgnoreCase("red") && !text.equalsIgnoreCase("green") &&
+            !text.equalsIgnoreCase("blue") && !text.equalsIgnoreCase("yellow") &&
+            !text.equalsIgnoreCase("cyan") && !text.equalsIgnoreCase("magenta") &&
+            !text.equalsIgnoreCase("orange") && !text.equalsIgnoreCase("pink") &&
+            !text.equalsIgnoreCase("grey") && !text.equalsIgnoreCase("gray") &&
+            !text.equalsIgnoreCase("skyblue") && !text.equalsIgnoreCase("black") &&
+            !text.equalsIgnoreCase("off") && !text.startsWith("#")) {
+            Serial.println("err: led needs a hex colour like #00A4EF or a named colour like red, blue, pink, white, or off");
+            return;
+        }
+        messaging::Led l = {};
+        l.color = rgb;
+        l.mode = messaging::LedMode::Solid;
+        l.periodMs = 600;
+        l.ttlMs = 15000;
+        Serial.printf("  led     : %s solid\n", text.length() > 0 ? text.c_str() : "white");
+        onLedCommand(l);
+        return;
+    }
+
     if (verb == "tz") {
         long seconds = 0;
         if (!parseLong(arg, &seconds) || !settings::setUtcOffsetSeconds(seconds)) {
@@ -680,7 +853,7 @@ void handleMachineCommand(const String& line) {
 
 // Settings that need a value read a whole line, so input is buffered until
 // Enter rather than dispatched per character like the single-key commands.
-enum class Prompt { None, EventTitles, Speaker, Timezone };
+enum class Prompt { None, EventTitles, Speaker, Timezone, Color };
 
 Prompt activePrompt = Prompt::None;
 String promptBuffer;
@@ -717,6 +890,10 @@ void beginPrompt(Prompt prompt) {
             Serial.print("time zone number> ");
             break;
         }
+        case Prompt::Color:
+            Serial.println("set all LEDs to a hex or named colour (e.g. #00A4EF, red, blue, white, off)");
+            Serial.print("colour> ");
+            break;
         case Prompt::None:
             break;
     }
@@ -762,6 +939,28 @@ void applyPrompt() {
                 Serial.printf("  pick a number between 1 and %u\n",
                               static_cast<unsigned>(settings::timezoneCount()));
             }
+            break;
+        }
+        case Prompt::Color: {
+            const uint32_t rgb = parseSolidColorValue(value);
+            if (rgb == 0xFFFFFF && value.length() > 0 && !value.equalsIgnoreCase("white") &&
+                !value.equalsIgnoreCase("red") && !value.equalsIgnoreCase("green") &&
+                !value.equalsIgnoreCase("blue") && !value.equalsIgnoreCase("yellow") &&
+                !value.equalsIgnoreCase("cyan") && !value.equalsIgnoreCase("magenta") &&
+                !value.equalsIgnoreCase("orange") && !value.equalsIgnoreCase("pink") &&
+                !value.equalsIgnoreCase("grey") && !value.equalsIgnoreCase("gray") &&
+                !value.equalsIgnoreCase("skyblue") && !value.equalsIgnoreCase("black") &&
+                !value.equalsIgnoreCase("off") && !value.startsWith("#")) {
+                Serial.println("  colour : invalid; use #RRGGBB or a named colour like red, blue, pink, white, or off");
+                break;
+            }
+            messaging::Led l = {};
+            l.color = rgb;
+            l.mode = messaging::LedMode::Solid;
+            l.periodMs = 600;
+            l.ttlMs = 15000;
+            Serial.printf("  led     : %s solid\n", value.length() > 0 ? value.c_str() : "white");
+            onLedCommand(l);
             break;
         }
         case Prompt::None:
@@ -1658,6 +1857,10 @@ void loop() {
             driveTest();
         } else if (command == 'l' || command == 'L') {
             toggleLights("serial");
+        } else if (command == 'c' || command == 'C') {
+            beginPrompt(Prompt::Color);
+        } else if (command == 'n' || command == 'N') {
+            nextLedAnimation();
         } else if (command == 'j' || command == 'J') {
             messaging::Audio a = {};
             strncpy(a.notes, jingles::find("tada"), sizeof(a.notes) - 1);

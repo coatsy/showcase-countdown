@@ -98,8 +98,15 @@ LED:
 {"color": "#FF8800", "mode": "blink", "period_ms": 400, "ttl_s": 10}
 ```
 
-- `mode` is `solid`, `blink`, `breathe`, or `off`. After `ttl_s` the pixel
-  returns to the schedule.
+- `mode` is `solid`, `blink`, `breathe`, `off`, `snake`, `ping`, `rainbow`, or
+  `rolling_rainbow`. After `ttl_s` the pixel returns to the schedule.
+- `period_ms` sets the animation speed: the blink or breathe cycle, one snake
+  lap, one ping round trip, or one rainbow rotation.
+- `snake` chases a bright pixel with a tail that halves in brightness behind it,
+  and `ping` bounces a single pixel end to end. Both use `color`.
+- `rainbow` spreads red through violet across the strip and `rolling_rainbow`
+  rotates that spread. Both ignore `color` and use the configured
+  `LED_BRIGHTNESS`. On a single-pixel strip they show red only.
 
 Config (retained):
 

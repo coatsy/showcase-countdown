@@ -101,11 +101,42 @@ int hexNibble(char c) {
     return -1;
 }
 
-// "#RRGGBB" or "RRGGBB". Anything else yields white so a typo is visible.
+// "#RRGGBB" or "RRGGBB". Named colours like red, blue, skyblue, orange and
+// off are also accepted. Anything else yields white so a typo is visible.
 uint32_t parseColor(const char* text) {
     if (text == nullptr) return 0xFFFFFF;
+    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') {
+        ++text;
+    }
     if (*text == '#') ++text;
-    if (strlen(text) != 6) return 0xFFFFFF;
+
+    const size_t length = strlen(text);
+    if (length == 0) return 0xFFFFFF;
+
+    // Accept simple colour names in a lowercase-friendly form.
+    static const struct {
+        const char* name;
+        uint32_t value;
+    } named[] = {
+        {"black", 0x000000}, {"off", 0x000000}, {"red", 0xFF0000}, {"green", 0x00FF00},
+        {"blue", 0x0000FF}, {"yellow", 0xFFFF00}, {"cyan", 0x00FFFF}, {"magenta", 0xFF00FF},
+        {"white", 0xFFFFFF}, {"orange", 0xFFA500}, {"grey", 0x808080}, {"gray", 0x808080},
+        {"skyblue", 0x87CEEB}, {"pink", 0xFFC0CB},
+    };
+
+    char lowered[32] = {0};
+    size_t loweredLen = 0;
+    for (; *text != '\0' && loweredLen + 1 < sizeof(lowered); ++text) {
+        lowered[loweredLen++] = static_cast<char>(tolower(static_cast<unsigned char>(*text)));
+    }
+    lowered[loweredLen] = '\0';
+    for (const auto& candidate : named) {
+        if (strcmp(candidate.name, lowered) == 0) {
+            return candidate.value;
+        }
+    }
+
+    if (length != 6) return 0xFFFFFF;
     uint32_t value = 0;
     for (int i = 0; i < 6; ++i) {
         const int nibble = hexNibble(text[i]);
@@ -120,6 +151,14 @@ LedMode parseLedMode(const char* mode) {
     if (strcmp(mode, "blink") == 0) return LedMode::Blink;
     if (strcmp(mode, "breathe") == 0) return LedMode::Breathe;
     if (strcmp(mode, "off") == 0) return LedMode::Off;
+    if (strcmp(mode, "snake") == 0) return LedMode::Snake;
+    if (strcmp(mode, "ping") == 0) return LedMode::Ping;
+    if (strcmp(mode, "rainbow") == 0) return LedMode::Rainbow;
+    // Accepted without the separator too, since callers routinely lower-case
+    // "RollingRainbow" without inserting one.
+    if (strcmp(mode, "rolling_rainbow") == 0 || strcmp(mode, "rollingrainbow") == 0) {
+        return LedMode::RollingRainbow;
+    }
     return LedMode::Solid;
 }
 

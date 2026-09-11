@@ -34,7 +34,7 @@ struct Audio {
     uint8_t volume;    // 0 = leave alone
 };
 
-enum class LedMode : uint8_t { Solid, Blink, Breathe, Off };
+enum class LedMode : uint8_t { Solid, Blink, Breathe, Off, Snake, Ping, Rainbow, RollingRainbow };
 
 struct Led {
     uint32_t color;    // 0xRRGGBB

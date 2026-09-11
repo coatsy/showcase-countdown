@@ -77,6 +77,42 @@ func teamLabel(d *Device) string {
 	return fmt.Sprintf("Table %04d", d.Code)
 }
 
+func normalizeColor(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", fmt.Errorf("color is empty")
+	}
+	if strings.HasPrefix(strings.ToLower(value), "#") {
+		value = value[1:]
+	}
+	if len(value) == 6 {
+		if _, err := strconv.ParseUint(value, 16, 32); err == nil {
+			return "#" + strings.ToUpper(value), nil
+		}
+	}
+
+	named := map[string]string{
+		"black":   "#000000",
+		"off":     "#000000",
+		"red":     "#FF0000",
+		"green":   "#00FF00",
+		"blue":    "#0000FF",
+		"yellow":  "#FFFF00",
+		"cyan":    "#00FFFF",
+		"magenta": "#FF00FF",
+		"white":   "#FFFFFF",
+		"orange":  "#FFA500",
+		"grey":    "#808080",
+		"gray":    "#808080",
+		"skyblue": "#87CEEB",
+		"pink":    "#FFC0CB",
+	}
+	if hex, ok := named[strings.ToLower(value)]; ok {
+		return hex, nil
+	}
+	return "", fmt.Errorf("unsupported color %q; use #RRGGBB or a named colour like red, blue, skyblue, orange, pink, white, or off", raw)
+}
+
 // ---- tool inputs ----
 
 type claimIn struct {
@@ -92,9 +128,9 @@ type playIn struct {
 	Volume int    `json:"volume,omitempty" jsonschema:"0-255, default leaves the current volume"`
 }
 type ledIn struct {
-	Color    string `json:"color" jsonschema:"hex colour like #FF6600"`
-	Mode     string `json:"mode,omitempty" jsonschema:"solid, blink, breathe or off (default solid)"`
-	PeriodMs int    `json:"period_ms,omitempty" jsonschema:"blink or breathe period in milliseconds (default 600)"`
+	Color    string `json:"color" jsonschema:"hex colour like #FF6600 or a named colour like red, blue, skyblue, orange or off; ignored by rainbow and rolling_rainbow"`
+	Mode     string `json:"mode,omitempty" jsonschema:"solid, blink, breathe, off, snake, ping, rainbow or rolling_rainbow (default solid)"`
+	PeriodMs int    `json:"period_ms,omitempty" jsonschema:"animation period in milliseconds: blink/breathe cycle, snake lap, ping round trip or rainbow rotation (default 600)"`
 	Seconds  int    `json:"seconds,omitempty" jsonschema:"how long before the pixel returns to its schedule, 1-60 (default 15)"`
 }
 type shoutIn struct {
@@ -255,17 +291,18 @@ func (a *App) mcpServer() *mcp.Server {
 			if mode == "" {
 				mode = "solid"
 			}
+			// Callers lower-case "RollingRainbow" without adding a separator.
+			if mode == "rollingrainbow" {
+				mode = "rolling_rainbow"
+			}
 			switch mode {
-			case "solid", "blink", "breathe", "off":
+			case "solid", "blink", "breathe", "off", "snake", "ping", "rainbow", "rolling_rainbow":
 			default:
-				return nil, nil, fmt.Errorf("mode must be solid, blink, breathe or off")
+				return nil, nil, fmt.Errorf("mode must be solid, blink, breathe, off, snake, ping, rainbow or rolling_rainbow")
 			}
-			color := strings.TrimSpace(in.Color)
-			if !strings.HasPrefix(color, "#") {
-				color = "#" + color
-			}
-			if len(color) != 7 {
-				return nil, nil, fmt.Errorf("color must be #RRGGBB")
+			color, err := normalizeColor(in.Color)
+			if err != nil {
+				return nil, nil, err
 			}
 			ttl := clampTTL(in.Seconds, 15)
 			if err := a.fleet.SendLed(d.ID, Led{Color: color, Mode: mode, PeriodMs: in.PeriodMs, TTL: ttl}); err != nil {

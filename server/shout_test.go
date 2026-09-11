@@ -37,6 +37,29 @@ func (p *shoutPublisher) Publish(topic string, _ byte, _ bool, payload any) mqtt
 	return shoutToken{}
 }
 
+func TestNormalizeColor(t *testing.T) {
+	for input, want := range map[string]string{
+		"#FF6600": "#FF6600",
+		"ff6600":  "#FF6600",
+		"red":     "#FF0000",
+		"Blue":    "#0000FF",
+		"skyblue": "#87CEEB",
+		"off":     "#000000",
+	} {
+		got, err := normalizeColor(input)
+		if err != nil {
+			t.Fatalf("normalizeColor(%q) returned error: %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("normalizeColor(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	if _, err := normalizeColor("bogus"); err == nil {
+		t.Fatal("normalizeColor('bogus') should reject unknown colors")
+	}
+}
+
 func TestShoutNotifications(t *testing.T) {
 	for _, scenario := range []string{"accepted", "locked", "invalid", "display failure", "audio failure", "LED failure"} {
 		t.Run(scenario, func(t *testing.T) {
