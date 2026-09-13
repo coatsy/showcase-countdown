@@ -739,6 +739,7 @@ void printSerialHelp() {
 void printSettings() {
     const long offset = settings::utcOffsetSeconds();
     Serial.println("current settings:");
+    Serial.printf("  team    : %s\n", teamName);
     Serial.printf("  titles  : %s\n", settings::eventTitles().c_str());
     Serial.printf("  speaker : %s\n", settings::speakerName().c_str());
     Serial.printf("  timezone: UTC%s (%s)\n", settings::formatUtcOffset(offset).c_str(),
@@ -787,6 +788,7 @@ void handleMachineCommand(const String& line) {
 
     if (verb == "get") {
         const long offset = settings::utcOffsetSeconds();
+        Serial.printf("ok: get team=%s\n", teamName);
         Serial.printf("ok: get title=%s\n", settings::eventTitles().c_str());
         Serial.printf("ok: get speaker=%s\n", settings::speakerName().c_str());
         Serial.printf("ok: get tz=%ld\n", offset);
@@ -836,6 +838,17 @@ void handleMachineCommand(const String& line) {
         settings::setEventTitles(arg);
         loadTitles();
         Serial.printf("ok: title=%s\n", settings::eventTitles().c_str());
+        return;
+    }
+
+    if (verb == "team") {
+        if (!settings::setTeamName(arg)) {
+            Serial.println("err: team must be Headwaters, Atlas, Outpost, Gateway, Trailblazer, Sentinel, Horizon, Basecamp, Wayfinder, Relay, or Waypoint");
+            return;
+        }
+        arg.toCharArray(teamName, sizeof(teamName));
+        lastStatePublishMs = 0;
+        Serial.printf("ok: team=%s\n", teamName);
         return;
     }
 
@@ -1157,11 +1170,20 @@ void drawTitle(LovyanGFX* g, int titleH) {
     }
 }
 
-// Claim code, broker link state, and team name along the bottom edge. Only
-// present when messaging is configured, so the plain countdown keeps its
-// original proportions.
+uint16_t teamColour(const char* name, uint16_t fallback) {
+    const settings::TeamOption* team = settings::findTeam(name);
+    if (team == nullptr) {
+        return fallback;
+    }
+    return rgb565(static_cast<uint8_t>(team->colour >> 16),
+                  static_cast<uint8_t>(team->colour >> 8),
+                  static_cast<uint8_t>(team->colour));
+}
+
+// Team name along the bottom edge, with claim code and broker link state when
+// messaging is configured. The plain countdown keeps its original proportions.
 int stripHeight(LovyanGFX* g) {
-    if (!messaging::enabled()) {
+    if (!messaging::enabled() && teamName[0] == '\0') {
         return 0;
     }
     g->setFont(&fonts::Font2);
@@ -1169,24 +1191,34 @@ int stripHeight(LovyanGFX* g) {
 }
 
 void drawStrip(LovyanGFX* g) {
-    if (!messaging::enabled()) {
+    const bool showMessaging = messaging::enabled();
+    if (!showMessaging && teamName[0] == '\0') {
         return;
     }
     g->setFont(&fonts::Font2);
     const int sh = g->fontHeight();
     const int y = layout.h - sh;
 
-    char code[8];
-    snprintf(code, sizeof(code), "%04u", static_cast<unsigned>(claimCode));
-    g->setTextDatum(top_left);
-    g->setTextColor(TFT_LIGHTGREY);
-    g->drawString(code, 4, y);
+    if (showMessaging) {
+        char code[8];
+        snprintf(code, sizeof(code), "%04u", static_cast<unsigned>(claimCode));
+        g->setTextDatum(top_left);
+        g->setTextColor(TFT_LIGHTGREY);
+        g->drawString(code, 4, y);
 
-    g->fillCircle(layout.w / 2, y + sh / 2, 3, messaging::connected() ? TFT_GREEN : TFT_RED);
+        g->fillCircle(layout.w / 2, y + sh / 2, 3, messaging::connected() ? TFT_GREEN : TFT_RED);
+    }
 
     if (teamName[0] != '\0') {
+        const int availableWidth = showMessaging ? layout.w / 2 - 12 : layout.w - 8;
+        const int nameWidth = g->textWidth(teamName);
+        const float scale = nameWidth > availableWidth
+            ? static_cast<float>(availableWidth) / nameWidth : 1.0f;
+        g->setTextSize(scale);
         g->setTextDatum(top_right);
-        g->drawString(teamName, layout.w - 4, y);
+        g->setTextColor(teamColour(teamName, TFT_LIGHTGREY));
+        g->drawString(teamName, layout.w - 4, y + (sh - g->fontHeight()) / 2);
+        g->setTextSize(1);
     }
 }
 
@@ -1239,11 +1271,11 @@ void drawOverlay(LovyanGFX* g, uint32_t elapsed) {
     char header[48];
     switch (overlay.kind) {
         case messaging::Kind::Dm:
-            accent = TFT_YELLOW;
+            accent = teamColour(overlay.from, TFT_YELLOW);
             snprintf(header, sizeof(header), "%s to you", overlay.from);
             break;
         case messaging::Kind::Shout:
-            accent = TFT_ORANGE;
+            accent = teamColour(overlay.from, TFT_ORANGE);
             snprintf(header, sizeof(header), "%s shouts", overlay.from);
             break;
         case messaging::Kind::Organiser:
@@ -1251,6 +1283,7 @@ void drawOverlay(LovyanGFX* g, uint32_t elapsed) {
             snprintf(header, sizeof(header), "ORGANISER");
             break;
         default:
+            accent = teamColour(teamName, TFT_CYAN);
             snprintf(header, sizeof(header), "%s", teamName[0] ? teamName : "message");
             break;
     }
@@ -1709,6 +1742,7 @@ void setup() {
     // NVS is ready before setup() runs, so the stored speaker can be applied to
     // the very first M5.begin() rather than needing a second restart.
     settings::begin();
+    settings::teamName().toCharArray(teamName, sizeof(teamName));
     const settings::SpeakerOption& speaker = settings::speaker();
 
     auto cfg = M5.config();
@@ -1879,6 +1913,8 @@ void loop() {
             Serial.println("  wifi    : stored credentials cleared");
         } else if (command == 'x' || command == 'X') {
             settings::resetConfigurable();
+            teamName[0] = '\0';
+            lastStatePublishMs = 0;
             loadTitles();
             Serial.println("  settings reset to built-in defaults (restarting)");
             Serial.flush();

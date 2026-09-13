@@ -100,6 +100,40 @@ inline void clearWifi() {
     remove("password");
 }
 
+struct TeamOption {
+    const char* name;
+    uint32_t colour;
+};
+
+const TeamOption TEAM_OPTIONS[] = {
+    {"Headwaters", 0x1D4ED8}, {"Atlas", 0x15803D}, {"Outpost", 0xEA580C},
+    {"Gateway", 0x38BDF8}, {"Trailblazer", 0xDC2626}, {"Sentinel", 0xEAB308},
+    {"Horizon", 0xDB2777}, {"Basecamp", 0x64748B}, {"Wayfinder", 0x7C3AED},
+    {"Relay", 0x0D9488}, {"Waypoint", 0x84CC16},
+};
+
+inline const TeamOption* findTeam(const char* name) {
+    for (const TeamOption& team : TEAM_OPTIONS) {
+        if (strcmp(name, team.name) == 0) {
+            return &team;
+        }
+    }
+    return nullptr;
+}
+
+inline String teamName() {
+    return read("team", "");
+}
+
+inline bool setTeamName(const String& name) {
+    const TeamOption* team = findTeam(name.c_str());
+    if (team == nullptr) {
+        return false;
+    }
+    write("team", team->name);
+    return true;
+}
+
 // --- Event titles ----------------------------------------------------------
 
 inline String eventTitles() {
@@ -224,6 +258,7 @@ inline const char* timezoneLabel(long seconds) {
 
 // Leaves Wi-Fi credentials alone; those have their own command.
 inline void resetConfigurable() {
+    remove("team");
     remove("titles");
     remove("speaker");
     remove("tz");

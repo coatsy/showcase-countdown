@@ -452,10 +452,27 @@
         <select id="cfgTimezone"></select>
       </div>
       <div class="field">
+        <label for="cfgTeam">Team name</label>
+        <select id="cfgTeam">
+          <option value="" disabled selected>Select a team</option>
+          <option data-colour="#15803D">Atlas</option>
+          <option data-colour="#64748B">Basecamp</option>
+          <option data-colour="#38BDF8">Gateway</option>
+          <option data-colour="#1D4ED8">Headwaters</option>
+          <option data-colour="#DB2777">Horizon</option>
+          <option data-colour="#EA580C">Outpost</option>
+          <option data-colour="#0D9488">Relay</option>
+          <option data-colour="#EAB308">Sentinel</option>
+          <option data-colour="#DC2626">Trailblazer</option>
+          <option data-colour="#7C3AED">Wayfinder</option>
+          <option data-colour="#84CC16">Waypoint</option>
+        </select>
+      </div>
+      <div class="field">
         <label for="cfgSpeaker">Speaker</label>
         <select id="cfgSpeaker">
           <option value="INTERNAL">Built-in buzzer</option>
-          <option value="HAT_SPK2">SPK HAT2 (I2S MAX98357)</option>
+          <option value="HAT_SPK2" selected>SPK HAT2 (I2S MAX98357)</option>
           <option value="HAT_SPK">SPK HAT (analogue PAM8303)</option>
           <option value="NONE">No audio</option>
         </select>
@@ -469,6 +486,12 @@
       The device stores a fixed offset from UTC and does no daylight-saving calculation of its own. This page reads the
       offset your chosen zone is on <em>right now</em> and sends that, so re-apply it after a daylight-saving change.
     </div>
+
+    <h2>Connect your coding agent</h2>
+    <p>Your device's four-digit claim code identifies it on the event MCP server. Your coding agent can use that
+      connection to send messages, play sounds and control the lights.
+      <a href="https://github.com/coatsy/showcase-countdown/blob/main/docs/teams.md">Read the MCP connection guide</a>
+      for GitHub Copilot, Claude Code and Cursor setup, example commands and troubleshooting.</p>
 
     <h2>Afterwards</h2>
     <p>The Stick has a few controls once it is running:</p>
@@ -547,12 +570,23 @@
       var titleInput = document.getElementById('cfgTitle');
       var zoneSelect = document.getElementById('cfgTimezone');
       var speakerSelect = document.getElementById('cfgSpeaker');
+      var teamSelect = document.getElementById('cfgTeam');
       var connectButton = document.getElementById('cfgConnect');
       var applyButton = document.getElementById('cfgApply');
       var logBox = document.getElementById('configLog');
 
       var port = null;
       var writer = null;
+
+      function updateTeamColour() {
+        var selected = teamSelect.options[teamSelect.selectedIndex];
+        teamSelect.style.color = selected ? selected.dataset.colour || '' : '';
+      }
+
+      Array.from(teamSelect.options).forEach(function (option) {
+        option.style.color = option.dataset.colour || 'var(--cp-text)';
+      });
+      teamSelect.addEventListener('change', updateTeamColour);
 
       function log(text) {
         logBox.hidden = false;
@@ -620,6 +654,26 @@
           pending = lines.pop();
           lines.forEach(function (line) {
             line = line.trim();
+            if (line.indexOf('ok: get team=') === 0) {
+              teamSelect.value = line.substring('ok: get team='.length);
+              if (teamSelect.selectedIndex < 0) { teamSelect.value = ''; }
+              updateTeamColour();
+            } else if (line.indexOf('ok: get title=') === 0) {
+              titleInput.value = line.substring('ok: get title='.length);
+            } else if (line.indexOf('ok: get speaker=') === 0) {
+              speakerSelect.value = line.substring('ok: get speaker='.length);
+            } else if (line.indexOf('ok: get tz=') === 0) {
+              var offset = line.substring('ok: get tz='.length);
+              zoneSelect.value = offset;
+              if (zoneSelect.selectedIndex < 0) {
+                var option = document.createElement('option');
+                option.value = offset;
+                option.textContent = formatOffset(Number(offset));
+                zoneSelect.appendChild(option);
+                zoneSelect.value = offset;
+              }
+              applyButton.disabled = false;
+            }
             // The device also prints status output; only echo command replies.
             if (line.indexOf('ok:') === 0 || line.indexOf('err:') === 0) { log(line); }
           });
@@ -637,7 +691,6 @@
           writer = port.writable.getWriter();
           readReplies();
           connectButton.disabled = true;
-          applyButton.disabled = false;
           log('Connected. Reading current settings.');
           await send('get');
         } catch (err) {
@@ -650,6 +703,7 @@
         try {
           var title = titleInput.value.trim();
           if (title) { await send('title ' + title); }
+          if (teamSelect.value) { await send('team ' + teamSelect.value); }
           await send('tz ' + zoneSelect.value);
           await send('speaker ' + speakerSelect.value);
           log('Sent. Restart the device if you changed the speaker.');

@@ -91,14 +91,18 @@ sends the credentials down the USB cable after flashing and the device keeps
 them in NVS. Send `w` over serial to forget them again.
 
 Build the firmware yourself if you want to change the event date, the palette,
-or the lights, since those are compile-time settings. The event title, speaker
-type, and time zone can be changed without rebuilding, either from the installer
-page or over serial.
+or the lights, since those are compile-time settings. The event title, team name,
+speaker type, and time zone can be changed without rebuilding, either from the
+installer page or over serial.
 
 ### Configuring from the page
 
 The installer page also has a configuration panel for a Stick that is already
-running. Connect the device, pick a title, time zone, and speaker, and apply.
+running. Connect the device, pick a title, team name, time zone, and speaker,
+and apply. The team selector offers the eleven predefined teams. Its selection
+is saved on that device across restarts, and the team name appears in its
+assigned colour on the device and dashboard. The page reads the current values
+when connected, so other settings are preserved when changing the team.
 
 The time zone list matters because the firmware stores a plain offset from UTC
 and never calculates daylight saving. The page resolves your chosen zone to the
@@ -143,7 +147,8 @@ page configures a device. Each one answers with `ok:` or `err:`.
 
 | Command | Effect |
 | --- | --- |
-| `!get` | Report the current title, speaker, and offset |
+| `!get` | Report the current team, title, speaker, and offset |
+| `!team <name>` | Save a team from the page's list, for example `!team Atlas` |
 | `!title <text>` | Set the title(s) |
 | `!tz <seconds>` | Set the UTC offset in seconds, from -43200 to 50400 |
 | `!speaker <name>` | Set the speaker type |

@@ -8,13 +8,13 @@
   :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --fg:#e6e8ee; --dim:#8b93a7; --ok:#3ddc84; --bad:#ff5d5d; --warn:#ffb03b; --accent:#4cc9f0; }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, Segoe UI, Roboto, sans-serif; }
-  header { display:flex; gap:16px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:2; }
+  header { display:flex; flex-wrap:wrap; gap:16px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); position:sticky; top:0; z-index:2; }
   header h1 { font-size:16px; margin:0; font-weight:600; }
   header .status { color:var(--dim); }
   header .pill { padding:2px 8px; border-radius:999px; border:1px solid var(--line); font-size:12px; }
   .pill.on { border-color:var(--ok); color:var(--ok); } .pill.off { border-color:var(--bad); color:var(--bad); } .pill.lock { border-color:var(--warn); color:var(--warn); }
   main { display:grid; grid-template-columns: 1fr 360px; gap:16px; padding:16px; }
-  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  @media (max-width: 1000px) { main { grid-template-columns: minmax(0, 1fr); } }
   .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap:12px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; }
   .card.offline { opacity:.55; }
@@ -75,6 +75,13 @@
 <script>
 const W = 240, H = 135;
 let fleet = { devices: [] };
+const TEAM_COLOURS = new Map([
+  ['Headwaters', '#1D4ED8'], ['Atlas', '#15803D'], ['Outpost', '#EA580C'],
+  ['Gateway', '#38BDF8'], ['Trailblazer', '#DC2626'], ['Sentinel', '#EAB308'],
+  ['Horizon', '#DB2777'], ['Basecamp', '#64748B'], ['Wayfinder', '#7C3AED'],
+  ['Relay', '#0D9488'], ['Waypoint', '#84CC16'],
+]);
+function teamColour(name, fallback = '#c0c0c0') { return TEAM_COLOURS.get(name) || fallback; }
 const jingles = ["ding","tada","merge","coin","levelup","alarm","sad","fail","knock","ok"];
 for (const j of jingles) { const o = document.createElement('option'); o.value = o.textContent = j; document.getElementById('s-jingle').appendChild(o); }
 
@@ -122,7 +129,7 @@ function drawStrip(ctx, d) {
   ctx.font = '11px monospace'; ctx.textBaseline = 'top';
   ctx.fillStyle = '#c0c0c0'; ctx.fillText(String(d.code || 0).padStart(4, '0'), 4, H - 13);
   ctx.fillStyle = d.online ? '#3ddc84' : '#ff5d5d'; ctx.beginPath(); ctx.arc(W / 2, H - 7, 3, 0, Math.PI * 2); ctx.fill();
-  if (d.team) { ctx.fillStyle = '#c0c0c0'; const w = ctx.measureText(d.team).width; ctx.fillText(d.team, W - 4 - w, H - 13); }
+  if (d.team) { ctx.fillStyle = teamColour(d.team); const w = ctx.measureText(d.team).width; ctx.fillText(d.team, W - 4 - w, H - 13); }
 }
 function drawDevice(canvas, d, now) {
   const ctx = canvas.getContext('2d');
@@ -130,7 +137,8 @@ function drawDevice(canvas, d, now) {
   const screen = d.screen && new Date(d.screen.until) > now ? d.screen : null;
   if (screen) {
     const kind = screen.kind || 'self';
-    const accent = { dm: '#ff0', shout: '#ffa500', organiser: '#f0f' }[kind] || '#0ff';
+    const defaultAccent = { dm: '#ff0', shout: '#ffa500', organiser: '#f0f' }[kind] || '#0ff';
+    const accent = kind === 'organiser' ? defaultAccent : teamColour(kind === 'dm' || kind === 'shout' ? screen.from : d.team, defaultAccent);
     const header = kind === 'dm' ? `${screen.from} to you` : kind === 'shout' ? `${screen.from} shouts` : kind === 'organiser' ? 'ORGANISER' : (d.team || 'message');
     ctx.font = '12px sans-serif'; ctx.textBaseline = 'top'; ctx.fillStyle = accent; ctx.fillText(header, 4, 2);
     ctx.fillStyle = accent; ctx.fillRect(4, 18, W - 8, 1);
@@ -178,6 +186,7 @@ function render() {
     const c = card(d);
     c.classList.toggle('offline', !d.online);
     c.querySelector('.name').textContent = d.team || `Table ${String(d.code).padStart(4, '0')}`;
+    c.querySelector('.name').style.color = teamColour(d.team, '');
     c.querySelector('.id').textContent = (d.virtual ? 'virtual ' : '') + d.id;
     const led = d.led && new Date(d.led.until) > now ? d.led : null;
     const ledCol = led ? (led.mode === 'off' ? '#000' : led.color) : '#222';
@@ -213,6 +222,7 @@ function addLog(e) {
   const div = document.createElement('div'); div.className = e.kind;
   const t = new Date(e.at).toLocaleTimeString();
   div.innerHTML = `<span class="k">${t} ${e.kind}</span> ${e.team ? '<b>' + esc(e.team) + '</b> ' : ''}${e.device && !e.team ? esc(e.device) + ' ' : ''}${esc(e.text)}`;
+  if (e.team) div.querySelector('b').style.color = teamColour(e.team, '');
   log.appendChild(div); while (log.children.length > 300) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
 }

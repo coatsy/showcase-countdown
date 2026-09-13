@@ -11,6 +11,40 @@ import (
 	"time"
 )
 
+func TestDashboardDeviceTeams(test *testing.T) {
+	bus := NewBus(10)
+	fleet := NewFleet(bus)
+	app := &App{fleet: fleet, policy: NewPolicy(time.Time{}), bus: bus}
+	mux := http.NewServeMux()
+	app.dashboardRoutes(mux)
+	for _, team := range []string{
+		"Headwaters", "Atlas", "Outpost", "Gateway", "Trailblazer", "Sentinel",
+		"Horizon", "Basecamp", "Wayfinder", "Relay", "Waypoint",
+	} {
+		test.Run(team, func(test *testing.T) {
+			payload, err := json.Marshal(stateMsg{Online: true, Code: 1234, Team: team})
+			if err != nil {
+				test.Fatal(err)
+			}
+			fleet.onState("device-1", payload)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/fleet", nil))
+			if response.Code != http.StatusOK {
+				test.Fatalf("fleet returned HTTP %d: %s", response.Code, response.Body.String())
+			}
+			var snapshot struct {
+				Devices []Device `json:"devices"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+				test.Fatal(err)
+			}
+			if len(snapshot.Devices) != 1 || snapshot.Devices[0].Team != team {
+				test.Fatalf("team update did not reach dashboard: %+v", snapshot.Devices)
+			}
+		})
+	}
+}
+
 func TestMCPProtocolMetadata(t *testing.T) {
 	for _, version := range []string{"2025-03-26", "2025-11-25"} {
 		for _, withMeta := range []bool{false, true} {
