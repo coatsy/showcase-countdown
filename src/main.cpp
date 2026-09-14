@@ -843,7 +843,7 @@ void handleMachineCommand(const String& line) {
 
     if (verb == "team") {
         if (!settings::setTeamName(arg)) {
-            Serial.println("err: team must be Headwaters, Atlas, Outpost, Gateway, Trailblazer, Sentinel, Horizon, Basecamp, Wayfinder, Relay, or Waypoint");
+            Serial.println("err: team must be Headwaters, Atlas, Outpost, Gateway, Trailblazer, Sentinel, Horizon, Basecamp, Wayfinder, Relay, Waypoint, or Coatsy");
             return;
         }
         arg.toCharArray(teamName, sizeof(teamName));

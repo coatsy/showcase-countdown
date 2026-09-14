@@ -22,6 +22,8 @@ __pycache__/
 tmp/*
 !tmp/.keep
 
+/serial-captures/
+
 # Go server build output
 server/showcase-server
 server/showcase-server.exe
