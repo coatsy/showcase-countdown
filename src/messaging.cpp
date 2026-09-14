@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include <esp_idf_version.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -9,12 +10,13 @@
 #include <string.h>
 
 #include "env_config.h"
+#include "firmware_ota.h"
 #include "jingles.h"
 
 namespace messaging {
 namespace {
 
-constexpr const char* FW_VERSION = "0.3.0-dev";
+constexpr const char* FW_VERSION = FIRMWARE_VERSION;
 constexpr size_t TOPIC_MAX = 64;
 constexpr size_t PAYLOAD_MAX = 768;
 constexpr uint32_t DEFAULT_TTL_MS = 15000;
@@ -299,7 +301,16 @@ void publishState(const Status& status) {
     doc["uptime_s"] = millis() / 1000;
     doc["heap"] = ESP.getFreeHeap();
     doc["fw"] = FW_VERSION;
-    char out[256];
+    doc["ip"] = WiFi.localIP().toString();
+    doc["ota"] = firmware_ota::ready();
+#if CONFIG_IDF_TARGET_ESP32S3
+    doc["chip"] = "esp32s3";
+#else
+    doc["chip"] = "esp32";
+#endif
+    static const String imageMd5 = ESP.getSketchMD5();
+    doc["image_md5"] = imageMd5;
+    char out[512];
     const size_t n = serializeJson(doc, out, sizeof(out));
     esp_mqtt_client_publish(client, stateTopic, out, n, 1, 1);
 }

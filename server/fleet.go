@@ -31,6 +31,10 @@ type Device struct {
 	Heap     int       `json:"heap"`
 	Uptime   int       `json:"uptime_s"`
 	FW       string    `json:"fw"`
+	IP       string    `json:"ip"`
+	OTA      bool      `json:"ota"`
+	Chip     string    `json:"chip"`
+	ImageMD5 string    `json:"image_md5"`
 	Locked   bool      `json:"locked"`
 	LastSeen time.Time `json:"last_seen"`
 
@@ -89,6 +93,10 @@ type stateMsg struct {
 	Uptime  int    `json:"uptime_s"`
 	Heap    int    `json:"heap"`
 	FW      string `json:"fw"`
+	IP      string `json:"ip"`
+	OTA     bool   `json:"ota"`
+	Chip    string `json:"chip"`
+	ImageMD5 string `json:"image_md5"`
 }
 
 // ButtonEvent mirrors showcase/dev/<id>/event/button.
@@ -286,10 +294,12 @@ func (f *Fleet) onState(id string, payload []byte) {
 	d := f.device(id)
 	wasOnline := d.Online
 	d.Online = s.Online
+	d.OTA = s.Online && s.OTA
 	d.LastSeen = time.Now()
 	if s.Online {
 		d.Voice, d.Battery, d.NTP, d.Fired = s.Voice, s.Battery, s.NTP, s.Fired
 		d.Code, d.Uptime, d.Heap, d.FW = s.Code, s.Uptime, s.Heap, s.FW
+		d.IP, d.Chip, d.ImageMD5 = s.IP, s.Chip, s.ImageMD5
 		if s.Team != "" {
 			d.Team = s.Team
 		}

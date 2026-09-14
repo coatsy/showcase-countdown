@@ -22,6 +22,7 @@
 #include "env_config.h"
 #include "espnow_link.h"
 #include "fanfare.h"
+#include "firmware_ota.h"
 #include "jingles.h"
 #include "light_schedule.h"
 #include "messaging.h"
@@ -789,6 +790,7 @@ void handleMachineCommand(const String& line) {
     if (verb == "get") {
         const long offset = settings::utcOffsetSeconds();
         Serial.printf("ok: get team=%s\n", teamName);
+        Serial.printf("ok: get firmware=%s\n", FIRMWARE_VERSION);
         Serial.printf("ok: get title=%s\n", settings::eventTitles().c_str());
         Serial.printf("ok: get speaker=%s\n", settings::speakerName().c_str());
         Serial.printf("ok: get tz=%ld\n", offset);
@@ -1200,11 +1202,17 @@ void drawStrip(LovyanGFX* g) {
     const int y = layout.h - sh;
 
     if (showMessaging) {
-        char code[8];
-        snprintf(code, sizeof(code), "%04u", static_cast<unsigned>(claimCode));
+        char code[sizeof(FIRMWARE_VERSION) + 6];
+        snprintf(code, sizeof(code), "%04u %s", static_cast<unsigned>(claimCode), FIRMWARE_VERSION);
+        const int availableWidth = layout.w / 2 - 12;
+        const int codeWidth = g->textWidth(code);
+        const float scale = codeWidth > availableWidth
+            ? static_cast<float>(availableWidth) / codeWidth : 1.0f;
+        g->setTextSize(scale);
         g->setTextDatum(top_left);
         g->setTextColor(TFT_LIGHTGREY);
-        g->drawString(code, 4, y);
+        g->drawString(code, 4, y + (sh - g->fontHeight()) / 2);
+        g->setTextSize(1);
 
         g->fillCircle(layout.w / 2, y + sh / 2, 3, messaging::connected() ? TFT_GREEN : TFT_RED);
     }
@@ -1603,7 +1611,7 @@ bool syncFromNtp() {
     }
 
     WiFi.mode(WIFI_STA);
-    if (messaging::enabled()) {
+    if (messaging::enabled() || firmware_ota::enabled()) {
         // Modem sleep adds hundreds of ms to inbound delivery. Units with
         // messaging are on USB power, so latency wins.
         WiFi.setSleep(false);
@@ -1668,7 +1676,7 @@ bool syncFromNtp() {
                       static_cast<long long>(EVENT_EPOCH_UTC) - static_cast<long long>(now));
     }
 
-    if (messaging::enabled()) {
+    if (messaging::enabled() || firmware_ota::enabled()) {
         // The radio stays up for MQTT. Auto-reconnect covers a dropped link.
         WiFi.setAutoReconnect(true);
         if (connected) {
@@ -1794,6 +1802,7 @@ void setup() {
     Serial.printf("  id      : %s\n", deviceIdStr);
     Serial.printf("  claim   : %04u\n", static_cast<unsigned>(claimCode));
     Serial.printf("  mqtt    : %s\n", messaging::enabled() ? MQTT_HOST : "disabled");
+    Serial.printf("  ota     : %s\n", firmware_ota::enabled() ? "configured" : "disabled (no valid password hash)");
     printSerialHelp();
 
     improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32, FIRMWARE_NAME, FIRMWARE_VERSION,
@@ -1940,6 +1949,10 @@ void loop() {
     static const messaging::Handlers handlers = {onDisplayCommand, onConfigCommand,
                                                  onAudioCommand, onLedCommand};
     messaging::poll(handlers);
+    firmware_ota::poll(deviceIdStr, !roomLocked && !nearFanfare(), []() {
+        stopSequence();
+        renderMessage("Firmware update", "Please wait...");
+    });
     serviceSequence();
     serviceLedOverride();
     if (messaging::connected() && !nearFanfare() &&

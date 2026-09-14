@@ -1,4 +1,4 @@
-module github.com/cauldnz/showcase-countdown/server
+module github.com/coatsy/showcase-countdown/server
 
 go 1.27.0
 

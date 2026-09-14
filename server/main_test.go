@@ -45,6 +45,39 @@ func TestDashboardDeviceTeams(test *testing.T) {
 	}
 }
 
+func TestFleetOTAMetadata(test *testing.T) {
+	fleet := NewFleet(NewBus(10))
+	fleet.onState("533db4", []byte(`{"online":true,"team":"Coatsy","ip":"192.168.8.128","ota":true,"chip":"esp32","fw":"ota-test","image_md5":"0123456789abcdef0123456789abcdef"}`))
+	app := &App{fleet: fleet, policy: NewPolicy(time.Time{})}
+	mux := http.NewServeMux()
+	app.dashboardRoutes(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/fleet", nil))
+	var snapshot struct {
+		Devices []Device `json:"devices"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		test.Fatal(err)
+	}
+	if len(snapshot.Devices) != 1 {
+		test.Fatalf("unexpected fleet: %+v", snapshot)
+	}
+	device := snapshot.Devices[0]
+	if !device.OTA || device.IP != "192.168.8.128" || device.Chip != "esp32" ||
+		device.FW != "ota-test" || device.ImageMD5 != "0123456789abcdef0123456789abcdef" {
+		test.Fatalf("OTA metadata missing: %+v", device)
+	}
+	fleet.onState("533db4", []byte(`{"online":false}`))
+	if fleet.Snapshot()[0].OTA {
+		test.Fatal("offline device advertised OTA readiness")
+	}
+	fleet.onState("533db4", []byte(`{"online":true,"fw":"legacy"}`))
+	device = fleet.Snapshot()[0]
+	if device.OTA || device.IP != "" || device.Chip != "" || device.ImageMD5 != "" {
+		test.Fatalf("legacy state retained stale OTA metadata: %+v", device)
+	}
+}
+
 func TestMCPProtocolMetadata(t *testing.T) {
 	for _, version := range []string{"2025-03-26", "2025-11-25"} {
 		for _, withMeta := range []bool{false, true} {
