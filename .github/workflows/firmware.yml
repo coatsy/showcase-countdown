@@ -41,9 +41,16 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Select the public build configuration
+        env:
+          OTA_PASSWORD_HASH: ${{ secrets.OTA_PASSWORD_HASH }}
         run: |
           cp .env.public .env
           printf 'FIRMWARE_VERSION="%s"\n' "${GITHUB_REF_NAME}" >> .env
+          if [ -z "${OTA_PASSWORD_HASH}" ]; then
+            echo "::error::OTA_PASSWORD_HASH secret is not configured for this repository or environment"
+            exit 1
+          fi
+          printf 'OTA_PASSWORD_HASH="%s"\n' "${OTA_PASSWORD_HASH}" >> .env
 
       # The published image is world-readable, so a stray credential in
       # .env.public would be a disclosure. Fail before anything is built.
