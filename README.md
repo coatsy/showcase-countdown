@@ -330,18 +330,21 @@ python tests/test_light_schedule.py
 
 ## Room messaging
 
-With `MQTT_HOST` set in `.env`, each unit keeps WiFi up after the time sync and
+With `MQTT_HOST` or `MQTT_URI` set in `.env`, each unit keeps WiFi up after the time sync and
 joins an MQTT broker. Teams then drive their own stick from their coding agents
 through an MCP server: messages, jingles and composed tunes, LED patterns,
 shouts to the room, and messages to other tables. The four-digit claim code
 shown under the countdown is the team's credential. Messaging is off when
-`MQTT_HOST` is empty, so a published, Improv-provisioned image is unaffected.
+both settings are empty (unless ESP-NOW relay is enabled), so a published,
+Improv-provisioned image is unaffected. Public connections use authenticated,
+certificate-verified MQTT over WebSockets; see [public transport](docs/messaging.md#public-mqtt-over-secure-websockets).
 
 | Doc | What it covers |
 | --- | --- |
 | [docs/plan.md](docs/plan.md) | The decisions, architecture and schedule |
 | [docs/messaging.md](docs/messaging.md) | MQTT topics, payloads and the tool list |
 | [docs/teams.md](docs/teams.md) | The one-page handout for tables |
+| [docs/flashing-quickstart.md](docs/flashing-quickstart.md) | Chris and Coatsey's USB/OTA flashing checklist |
 | [server/](server/) | The Go MCP server, dashboard, fake fleet, and router deploy |
 
 The server, broker, LAN NTP and dashboard run as one Go binary on an

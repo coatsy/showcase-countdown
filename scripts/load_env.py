@@ -14,10 +14,11 @@ import os
 import re
 import sys
 from datetime import datetime
+from urllib.parse import urlsplit
 
 Import("env")  # noqa: F821 - injected by SCons
 
-ENV_PATH = os.path.join(env.subst("$PROJECT_DIR"), ".env")  # noqa: F821
+ENV_PATH = os.environ.get("SHOWCASE_ENV_FILE") or os.path.join(env.subst("$PROJECT_DIR"), ".env")  # noqa: F821
 GENERATED_DIR = os.path.join(env.subst("$BUILD_DIR"), "generated")  # noqa: F821
 HEADER_PATH = os.path.join(GENERATED_DIR, "env_config.h")
 
@@ -50,12 +51,17 @@ DEFAULTS = {
     # after the NTP sync and no MQTT client is started.
     "MQTT_HOST": '""',
     "MQTT_PORT": "1883",
+    "MQTT_URI": '""',
+    "MQTT_USERNAME": '""',
+    "MQTT_PASSWORD": '""',
     # Mixed into the on-screen claim code so it cannot be derived from the
     # device id printed in the boot banner.
     "CLAIM_SALT": '"showcase"',
     # 2.4 GHz channel the event AP is pinned to; ESP-NOW frames from the bridge
     # are sent on it and unassociated sticks park their radio there.
     "ESPNOW_CHANNEL": "6",
+    "ESPNOW_RELAY_ENABLED": "0",
+    "ESPNOW_RELAY_KEY": '""',
 }
 
 _LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
@@ -99,6 +105,11 @@ _BOOLEANS = {
 }
 
 _DERIVED_SETTINGS = {
+    "MQTT_URI",
+    "MQTT_USERNAME",
+    "MQTT_PASSWORD",
+    "ESPNOW_RELAY_ENABLED",
+    "ESPNOW_RELAY_KEY",
     "SPEAKER",
     "LED_ENABLED",
     "LED_TYPE",
@@ -236,6 +247,35 @@ def literal(value, quoted):
 
 
 def render(entries, epoch, parsed):
+    mqtt_uri = setting_value(entries, "MQTT_URI")
+    if not mqtt_uri and setting_value(entries, "MQTT_HOST"):
+        port = integer_range_setting(entries, "MQTT_PORT", 1, 65535)
+        mqtt_uri = "mqtt://%s:%d" % (setting_value(entries, "MQTT_HOST"), port)
+    username = setting_value(entries, "MQTT_USERNAME")
+    password = setting_value(entries, "MQTT_PASSWORD")
+    try:
+        broker = urlsplit(mqtt_uri)
+        port = broker.port
+    except ValueError:
+        fail("MQTT_URI must contain a valid broker hostname and port")
+    if mqtt_uri and (
+        broker.scheme not in ("mqtt", "mqtts", "wss") or not broker.hostname
+        or broker.username is not None or broker.password is not None
+        or broker.query or broker.fragment or port == 0
+        or any(char.isspace() or ord(char) < 32 for char in mqtt_uri)
+    ):
+        fail("MQTT_URI must be mqtt://, mqtts:// or wss:// without userinfo, query or fragment")
+    tls = broker.scheme in ("mqtts", "wss")
+    if username or password:
+        if not tls or not username or not password:
+            fail("MQTT credentials require TLS and both MQTT_USERNAME and MQTT_PASSWORD")
+    if broker.scheme == "wss" and (not username or len(password) < 32):
+        fail("Public WSS requires MQTT_USERNAME and a private password of at least 32 characters")
+    relay_enabled = boolean_setting(entries, "ESPNOW_RELAY_ENABLED")
+    relay_key = setting_value(entries, "ESPNOW_RELAY_KEY")
+    if relay_enabled and not re.fullmatch(r"[0-9a-fA-F]{64}", relay_key):
+        fail("ESPNOW_RELAY_ENABLED requires a private 64-hex-character ESPNOW_RELAY_KEY")
+    integer_range_setting(entries, "ESPNOW_CHANNEL", 1, 14)
     speaker = setting_value(entries, "SPEAKER").upper()
     if speaker not in _SPEAKERS:
         fail("SPEAKER=%r must be one of: %s" % (speaker, ", ".join(sorted(_SPEAKERS))))
@@ -257,6 +297,12 @@ def render(entries, epoch, parsed):
     lines = [
         "// AUTO-GENERATED from .env by scripts/load_env.py. Do not edit, do not commit.",
         "#pragma once",
+        "#define ESPNOW_RELAY_ENABLED %d" % relay_enabled,
+        "#define ESPNOW_RELAY_KEY %s" % c_string(relay_key if relay_enabled else ""),
+        "#define MQTT_URI %s" % c_string(mqtt_uri),
+        "#define MQTT_USERNAME %s" % c_string(username),
+        "#define MQTT_PASSWORD %s" % c_string(password),
+        "#define MQTT_TLS %d" % tls,
         "",
         "// %s -> %d" % (parsed.isoformat(), epoch),
         "#define EVENT_EPOCH_UTC %dLL" % epoch,

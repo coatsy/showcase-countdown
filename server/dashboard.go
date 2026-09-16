@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -72,6 +75,38 @@ func shellQuote(text string) ([]string, error) {
 }
 
 func (a *App) dashboardRoutes(mux *http.ServeMux) {
+	dashboard := http.NewServeMux()
+	a.registerDashboardRoutes(dashboard)
+	mux.Handle("/", dashboardAuth(os.Getenv("DASHBOARD_PASSWORD"), dashboard))
+}
+
+func dashboardAuth(password string, next http.Handler) http.Handler {
+	expected := sha256.Sum256([]byte(password))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if password != "" {
+			w.Header().Set("Cache-Control", "no-store")
+			user, supplied, ok := r.BasicAuth()
+			actual := sha256.Sum256([]byte(supplied))
+			if !ok || user != "showcase" || subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Showcase dashboard", charset="UTF-8"`)
+				http.Error(w, "dashboard password required", http.StatusUnauthorized)
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				origin := r.Header.Get("Origin")
+				parsed, err := url.Parse(origin)
+				if r.Header.Get("Sec-Fetch-Site") == "cross-site" ||
+					(origin != "" && (err != nil || parsed.Host != r.Host || (parsed.Scheme != "http" && parsed.Scheme != "https"))) {
+					http.Error(w, "cross-origin dashboard action refused", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (a *App) registerDashboardRoutes(mux *http.ServeMux) {
 	sub, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 

@@ -26,8 +26,9 @@ type shoutToken struct {
 	err error
 }
 
-func (t shoutToken) Wait() bool   { return true }
-func (t shoutToken) Error() error { return t.err }
+func (t shoutToken) Wait() bool                     { return true }
+func (t shoutToken) WaitTimeout(time.Duration) bool { return true }
+func (t shoutToken) Error() error                   { return t.err }
 func (p *shoutPublisher) Publish(topic string, _ byte, _ bool, payload any) mqtt.Token {
 	p.topics = append(p.topics, topic)
 	p.payloads = append(p.payloads, payload.([]byte))

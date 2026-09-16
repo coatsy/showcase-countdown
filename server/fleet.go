@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -19,24 +21,27 @@ const topicPrefix = "showcase/"
 // are derived from the commands the server has seen, so the dashboard can draw
 // what a stick should be showing without the stick reporting pixels.
 type Device struct {
-	ID       string    `json:"id"`
-	Virtual  bool      `json:"virtual"`
-	Online   bool      `json:"online"`
-	Code     int       `json:"code"`
-	Team     string    `json:"team"`
-	Voice    string    `json:"voice"`
-	Battery  int       `json:"battery"`
-	NTP      bool      `json:"ntp"`
-	Fired    bool      `json:"fired"`
-	Heap     int       `json:"heap"`
-	Uptime   int       `json:"uptime_s"`
-	FW       string    `json:"fw"`
-	IP       string    `json:"ip"`
-	OTA      bool      `json:"ota"`
-	Chip     string    `json:"chip"`
-	ImageMD5 string    `json:"image_md5"`
-	Locked   bool      `json:"locked"`
-	LastSeen time.Time `json:"last_seen"`
+	ID         string    `json:"id"`
+	Virtual    bool      `json:"virtual"`
+	Online     bool      `json:"online"`
+	Code       int       `json:"code"`
+	Team       string    `json:"team"`
+	Voice      string    `json:"voice"`
+	Battery    int       `json:"battery"`
+	NTP        bool      `json:"ntp"`
+	Fired      bool      `json:"fired"`
+	Heap       int       `json:"heap"`
+	Uptime     int       `json:"uptime_s"`
+	FW         string    `json:"fw"`
+	IP         string    `json:"ip"`
+	OTA        bool      `json:"ota"`
+	Chip       string    `json:"chip"`
+	ImageMD5   string    `json:"image_md5"`
+	Locked     bool      `json:"locked"`
+	LastSeen   time.Time `json:"last_seen"`
+	Transport  string    `json:"transport,omitempty"`
+	TimeSource string    `json:"time_source,omitempty"`
+	radioSeen  time.Time
 
 	Screen *Display   `json:"screen,omitempty"`
 	LED    *Led       `json:"led,omitempty"`
@@ -82,21 +87,24 @@ type Config struct {
 }
 
 type stateMsg struct {
-	Online  bool   `json:"online"`
-	ID      string `json:"id"`
-	Voice   string `json:"voice"`
-	Battery int    `json:"battery"`
-	NTP     bool   `json:"ntp"`
-	Fired   bool   `json:"fired"`
-	Code    int    `json:"code"`
-	Team    string `json:"team"`
-	Uptime  int    `json:"uptime_s"`
-	Heap    int    `json:"heap"`
-	FW      string `json:"fw"`
-	IP      string `json:"ip"`
-	OTA     bool   `json:"ota"`
-	Chip    string `json:"chip"`
-	ImageMD5 string `json:"image_md5"`
+	Online     bool   `json:"online"`
+	ID         string `json:"id"`
+	Voice      string `json:"voice"`
+	Battery    int    `json:"battery"`
+	NTP        bool   `json:"ntp"`
+	Fired      bool   `json:"fired"`
+	Code       int    `json:"code"`
+	Team       string `json:"team"`
+	Uptime     int    `json:"uptime_s"`
+	Heap       int    `json:"heap"`
+	FW         string `json:"fw"`
+	IP         string `json:"ip"`
+	OTA        bool   `json:"ota"`
+	Chip       string `json:"chip"`
+	ImageMD5   string `json:"image_md5"`
+	Transport  string `json:"transport"`
+	TimeSource string `json:"time_source"`
+	RadioAt    int64  `json:"_radio_at_ms"`
 }
 
 // ButtonEvent mirrors showcase/dev/<id>/event/button.
@@ -109,12 +117,16 @@ type ButtonEvent struct {
 
 // Fleet is the device registry plus the broker connection.
 type Fleet struct {
-	mu         sync.RWMutex
-	devices    map[string]*Device
-	waiters    map[string][]chan ButtonEvent
-	bus        *Bus
-	client     mqtt.Client
-	bridgeText string
+	mu               sync.RWMutex
+	devices          map[string]*Device
+	waiters          map[string][]chan ButtonEvent
+	bus              *Bus
+	client           mqtt.Client
+	bridgeText       string
+	serialBridge     bool
+	relay            *RadioRelay
+	deliveryPrefix   string
+	deliverySequence atomic.Uint64
 
 	onTeamsChanged func() // set by main to persist team names
 }
@@ -182,6 +194,9 @@ func (f *Fleet) RepublishTeams() {
 func (f *Fleet) BridgeStatus() string {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
+	if f.serialBridge {
+		return "online via USB, ESP-NOW relay v2"
+	}
 	if f.bridgeText == "" {
 		return "never seen"
 	}
@@ -189,7 +204,19 @@ func (f *Fleet) BridgeStatus() string {
 }
 
 func NewFleet(bus *Bus) *Fleet {
-	return &Fleet{devices: map[string]*Device{}, waiters: map[string][]chan ButtonEvent{}, bus: bus}
+	return &Fleet{devices: map[string]*Device{}, waiters: map[string][]chan ButtonEvent{}, bus: bus,
+		deliveryPrefix: rand.Text()}
+}
+
+func (f *Fleet) setSerialBridge(online bool) {
+	f.mu.Lock()
+	changed := f.serialBridge != online
+	f.serialBridge = online
+	f.mu.Unlock()
+	if changed {
+		f.bus.Emit(Event{Kind: "presence", Device: "bridge",
+			Text: fmt.Sprintf("USB ESP-NOW relay online=%t", online)})
+	}
 }
 
 // Connect opens the broker session and subscribes to the whole tree. Retained
@@ -202,7 +229,7 @@ func (f *Fleet) Connect(brokerURL string) error {
 		SetAutoReconnect(true).
 		SetConnectRetry(true).
 		SetConnectRetryInterval(2 * time.Second).
-		SetOrderMatters(false)
+		SetOrderMatters(true)
 	opts.OnConnect = func(c mqtt.Client) {
 		log.Printf("mqtt: connected to %s", brokerURL)
 		if t := c.Subscribe(topicPrefix+"#", 1, f.onMessage); t.Wait() && t.Error() != nil {
@@ -224,6 +251,9 @@ func (f *Fleet) Connected() bool {
 }
 
 func (f *Fleet) onMessage(_ mqtt.Client, m mqtt.Message) {
+	if f.relay != nil {
+		f.relay.Forward(m.Topic(), m.Payload(), m.Retained())
+	}
 	parts := strings.Split(strings.TrimPrefix(m.Topic(), topicPrefix), "/")
 	// dev/<id>/<group>/<name>
 	if len(parts) == 4 && parts[0] == "dev" {
@@ -292,11 +322,34 @@ func (f *Fleet) onState(id string, payload []byte) {
 	}
 	f.mu.Lock()
 	d := f.device(id)
+	now := time.Now()
+	if s.Transport == "espnow" {
+		at := time.UnixMilli(s.RadioAt)
+		if s.RadioAt == 0 || now.Sub(at) >= radioOfflineAfter || at.After(now.Add(time.Second)) {
+			f.mu.Unlock()
+			return
+		}
+		d.radioSeen = at
+	} else if !s.Online && !d.radioSeen.IsZero() && now.Sub(d.radioSeen) < radioOfflineAfter {
+		// A late direct-MQTT LWT cannot take a live radio device offline.
+		f.mu.Unlock()
+		return
+	} else if s.Online {
+		d.radioSeen = time.Time{}
+	}
 	wasOnline := d.Online
 	d.Online = s.Online
 	d.OTA = s.Online && s.OTA
-	d.LastSeen = time.Now()
+	d.LastSeen = now
 	if s.Online {
+		d.Transport = "mqtt"
+		if s.Transport == "espnow" {
+			d.Transport = "espnow"
+		}
+		d.TimeSource = s.TimeSource
+		if d.TimeSource == "" && s.NTP {
+			d.TimeSource = "ntp"
+		}
 		d.Voice, d.Battery, d.NTP, d.Fired = s.Voice, s.Battery, s.NTP, s.Fired
 		d.Code, d.Uptime, d.Heap, d.FW = s.Code, s.Uptime, s.Heap, s.FW
 		d.IP, d.Chip, d.ImageMD5 = s.IP, s.Chip, s.ImageMD5
@@ -309,6 +362,22 @@ func (f *Fleet) onState(id string, payload []byte) {
 	if wasOnline != s.Online {
 		f.bus.Emit(Event{Kind: "presence", Device: id, Team: team,
 			Text: map[bool]string{true: "online", false: "offline"}[s.Online]})
+	}
+}
+
+func (f *Fleet) expireRadio(now time.Time) {
+	var expired []Device
+	f.mu.Lock()
+	for _, d := range f.devices {
+		if d.Online && d.Transport == "espnow" && now.Sub(d.radioSeen) >= radioOfflineAfter {
+			d.Online = false
+			d.OTA = false
+			expired = append(expired, *d)
+		}
+	}
+	f.mu.Unlock()
+	for _, d := range expired {
+		f.bus.Emit(Event{Kind: "presence", Device: d.ID, Team: d.Team, Text: "offline (ESP-NOW heartbeat expired)"})
 	}
 }
 
@@ -477,8 +546,39 @@ func (f *Fleet) publish(topic string, v any, retain bool) error {
 	if err != nil {
 		return err
 	}
+	parts := strings.Split(topic, "/")
+	if len(parts) >= 4 && parts[len(parts)-2] == "cmd" {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(payload, &obj); err != nil || obj == nil {
+			return fmt.Errorf("command payload must be an object")
+		}
+		obj["_delivery_id"], _ = json.Marshal(fmt.Sprintf("%s-%d", f.deliveryPrefix, f.deliverySequence.Add(1)))
+		payload, err = json.Marshal(obj)
+		if err != nil {
+			return err
+		}
+		if f.relay != nil && len(payload) > relayPayloadMax {
+			return fmt.Errorf("command exceeds ESP-NOW limit of %d bytes", relayPayloadMax)
+		}
+	}
+	if f.client == nil {
+		return fmt.Errorf("MQTT client is not connected")
+	}
 	t := f.client.Publish(topic, 1, retain, payload)
-	t.Wait()
+	if !t.WaitTimeout(3 * time.Second) {
+		return fmt.Errorf("MQTT publish timed out")
+	}
+	return t.Error()
+}
+
+func (f *Fleet) publishRadio(topic string, payload []byte, retain bool) error {
+	if !f.Connected() {
+		return fmt.Errorf("MQTT broker unavailable for radio uplink")
+	}
+	t := f.client.Publish(topic, 1, retain, payload)
+	if !t.WaitTimeout(3 * time.Second) {
+		return fmt.Errorf("radio uplink MQTT publish timed out")
+	}
 	return t.Error()
 }
 

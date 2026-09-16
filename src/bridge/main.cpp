@@ -19,6 +19,8 @@
 #include <string.h>
 
 #include "env_config.h"
+#include "../espnow_relay.h"
+#include "../mqtt_transport.h"
 
 namespace {
 
@@ -30,12 +32,13 @@ constexpr const char* STATE_TOPIC = "showcase/bridge/state";
 constexpr uint32_t STATE_MS = 10000;
 
 const uint8_t BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-const bool MQTT_ENABLED = MQTT_HOST[0] != '\0';
+const bool MQTT_ENABLED = MQTT_URI[0] != '\0';
 
 uint32_t sent = 0;
 char lastCommand[40] = "none";
-char line[80];
+char line[4097];
 size_t lineLength = 0;
+bool lineOverflow = false;
 bool espNowReady = false;
 esp_mqtt_client_handle_t mqtt = nullptr;
 volatile bool mqttConnected = false;
@@ -158,10 +161,8 @@ void onMqttEvent(void*, esp_event_base_t, int32_t eventId, void* eventData) {
 }
 
 void startMqtt() {
-    static char uri[64];
-    snprintf(uri, sizeof(uri), "mqtt://%s:%d", MQTT_HOST, MQTT_PORT);
     esp_mqtt_client_config_t cfg = {};
-    cfg.uri = uri;
+    configureMqttBroker(cfg);
     cfg.client_id = "showcase-bridge";
     cfg.keepalive = 30;
     cfg.lwt_topic = STATE_TOPIC;
@@ -172,12 +173,13 @@ void startMqtt() {
     mqtt = esp_mqtt_client_init(&cfg);
     esp_mqtt_client_register_event(mqtt, MQTT_EVENT_ANY, onMqttEvent, nullptr);
     esp_mqtt_client_start(mqtt);
-    Serial.printf("mqtt %s\n", uri);
+    Serial.printf("mqtt %s\n", MQTT_URI);
 }
 
 }  // namespace
 
 void setup() {
+    Serial.setRxBufferSize(8192);
     Serial.begin(115200);
     auto cfg = M5.config();
     M5.begin(cfg);
@@ -187,6 +189,16 @@ void setup() {
 
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
+    if (espnow_relay::enabled()) {
+        WiFi.setAutoReconnect(false);
+        WiFi.disconnect(false, false);
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+        espnow_relay::begin(true);
+        espNowReady = espnow_relay::ready();
+        draw();
+        return; // USB backhaul never associates/scans, regardless of saved credentials.
+    }
     WiFi.setAutoReconnect(true);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     const uint32_t deadline = millis() + 15000;
@@ -215,24 +227,31 @@ void setup() {
 
 void loop() {
     M5.update();
+    espnow_relay::poll();
     if (commandPending) {
         commandPending = false;
         handle(pendingCommand, "mqtt");
     }
-    while (Serial.available()) {
+    // Limit per pass so a busy/malformed host cannot starve RF ACK/retry service.
+    for (unsigned read = 0; read < 512 && Serial.available(); ++read) {
         const char c = static_cast<char>(Serial.read());
-        if (c == '\n' || c == '\r') {
-            if (lineLength > 0) {
+        if (c == '\n') {
+            if (lineOverflow) Serial.println("relay serial line over 4096 bytes; discarded");
+            else if (lineLength > 0) {
                 line[lineLength] = '\0';
-                handle(line, "serial");
-                lineLength = 0;
+                if (espnow_relay::enabled() && line[0] == '{') espnow_relay::serialLine(line);
+                else handle(line, "serial");
             }
-        } else if (lineLength + 1 < sizeof(line)) {
+            lineLength = 0;
+            lineOverflow = false;
+        } else if (c == '\r') {
+            continue;
+        } else if (!lineOverflow && lineLength + 1 < sizeof(line)) {
             line[lineLength++] = c;
-        }
+        } else lineOverflow = true;
     }
     // Button A re-sends the last command, for a bench test without a host.
-    if (M5.BtnA.wasClicked() && strcmp(lastCommand, "none") != 0) {
+    if (!espnow_relay::enabled() && M5.BtnA.wasClicked() && strcmp(lastCommand, "none") != 0) {
         handle(lastCommand, "button");
     }
     if (millis() - lastStateMs >= STATE_MS) {

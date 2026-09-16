@@ -3,6 +3,53 @@
 Event: **17 September 2026, 14:00 UTC+10** (epoch `1789617600`).
 These are measured bench results, not full venue sign-off.
 
+## 16 September: public transport and OTA acceptance
+
+Selected unfinished firmware/server work was preserved with binary patches,
+verified before rebasing, then restored onto `coatsy/showcase-countdown` main
+at `67750ec`. The parent checkout and QoS deployment were not modified.
+
+The attached COM4 device was identified as **52f940**, ESP32-PICO-D4, 4 MB.
+Its original single-slot table was migrated to `min_spiffs` through targeted
+USB writes without overwriting NVS. Authenticated OTA A-to-B completed and
+rebooted into the exact transmitted image; invalid authentication was rejected.
+One initial transfer failed for an undetermined reason before the successful
+retry. See [the detailed OTA evidence](ota-feasibility.md).
+
+Public acceptance used the actual **MSFT Hack** SSID:
+
+| Measurement | Observed result |
+| --- | --- |
+| Physical stick address | `172.22.10.117` |
+| PC Wi-Fi address | `172.22.10.102` |
+| Stick firmware | `67750ec-public-wss-a` |
+| Application size / OTA slot | 1,303,360 / 1,966,080 bytes |
+| Reported and built application MD5 | `f5397180584319b08c77c5b326e92584` |
+| Direct transport | Native certificate-verified `wss://mqtt.cauldnz.org/mqtt` |
+| Public broker authentication | Anonymous and incorrect-password connections rejected |
+| Public MCP | `initialize` and `tools/list` succeeded on organiser and team routes (21 tools); device `status` succeeded |
+| Actual device interaction | Public MCP `show` delivered an eight-second message; the physical stick's serial overlay receipt confirmed delivery through public MQTT |
+| Device time | Fresh state reported NTP synchronization |
+
+The AX server was deployed with exactly one explicitly approved event-server
+restart. Runtime locks, mutes and cooldowns reset as disclosed. The public
+WebSocket listener is loopback-only, with per-device credentials and topic
+permissions. Existing dashboard/MCP ingress routes were preserved; only the
+MQTT hostname was added to the tunnel.
+
+Venue DNS initially cached NXDOMAIN for the newly created hostname. With
+separate approval, the parent cleared only the USG DNS forwarding cache using
+its native operational command. The dnsmasq PID/start time stayed unchanged;
+no DNS configuration, routing, firewall or QoS settings changed. Final hardware
+acceptance used the venue resolver without a DNS override. QoS remained running.
+
+The former MCP invalid-Host rejection is fixed without dropping rebinding
+protection. Cloudflare separately rejected Python urllib's default user agent
+with error 1010; the actual curl client passed without changing WAF settings.
+These results verify this attached device, not a whole-fleet soak or rollback
+under power loss. Private firmware contains credentials and must not be published;
+ArduinoOTA remains trusted-LAN-only because its image transfer is unencrypted.
+
 ## Reproduce the table-stick configuration
 
 `config/event-stick.env` records the configuration used to enable Stick 2's
