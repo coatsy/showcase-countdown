@@ -18,13 +18,14 @@ const (
 
 // App wires the fleet, policy, and bus behind the MCP tools and the dashboard.
 type App struct {
-	fleet  *Fleet
-	policy *Policy
-	bus    *Bus
-	bridge *SerialBridge // optional USB path; MQTT is the usual one
-	secret string
-	title  string
-	epoch  time.Time
+	fleet    *Fleet
+	policy   *Policy
+	bus      *Bus
+	bridge   *SerialBridge // optional USB path; MQTT is the usual one
+	secret   string
+	title    string
+	epoch    time.Time
+	otaRunner func([]string) error
 }
 
 func text(format string, args ...any) *mcp.CallToolResult {

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -27,9 +30,54 @@ type sendRequest struct {
 	Mode    string `json:"mode,omitempty"`
 }
 
+func defaultOTARunner(targets []string) error {
+	if len(targets) == 0 {
+		return fmt.Errorf("no targets selected for OTA update")
+	}
+	cmdText := strings.TrimSpace(os.Getenv("OTA_RUNNER"))
+	if cmdText == "" {
+		return fmt.Errorf("OTA_RUNNER is not configured; set it to a command template like: OTA_RUNNER='python ../scripts/ota_push.py --target {target}'")
+	}
+	for _, target := range targets {
+		cmd := strings.ReplaceAll(cmdText, "{target}", target)
+		cmd = strings.ReplaceAll(cmd, "{targets}", strings.Join(targets, ","))
+		parts, err := shellQuote(cmd)
+		if err != nil {
+			return fmt.Errorf("invalid OTA_RUNNER template: %w", err)
+		}
+		if err := exec.Command(parts[0], parts[1:]...).Run(); err != nil {
+			return fmt.Errorf("OTA update failed for %s: %w", target, err)
+		}
+	}
+	return nil
+}
+
+func shellQuote(text string) ([]string, error) {
+	if text == "" {
+		return nil, fmt.Errorf("empty command")
+	}
+	var shell, flag string
+	if runtime.GOOS == "windows" {
+		shell = "powershell"
+		flag = "-Command"
+	} else {
+		shell = "/bin/sh"
+		flag = "-lc"
+	}
+	cmd := exec.Command(shell, flag, text)
+	if cmd.Args == nil {
+		return nil, fmt.Errorf("failed to build command")
+	}
+	return append([]string{cmd.Path}, cmd.Args[1:]...), nil
+}
+
 func (a *App) dashboardRoutes(mux *http.ServeMux) {
 	sub, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/", http.FileServer(http.FS(sub)))
+
+	if a.otaRunner == nil {
+		a.otaRunner = defaultOTARunner
+	}
 
 	mux.HandleFunc("GET /api/fleet", func(w http.ResponseWriter, r *http.Request) {
 		manual, auto := a.policy.LockState()
@@ -136,6 +184,22 @@ func (a *App) dashboardRoutes(mux *http.ServeMux) {
 			}
 			a.policy.SetMuted(d.ID, r.PathValue("action") == "mute")
 			a.bus.Emit(Event{Kind: "organiser", Device: d.ID, Team: teamLabel(d), Text: r.PathValue("action") + "d"})
+		case "ota":
+			target := strings.TrimSpace(r.URL.Query().Get("target"))
+			if target == "" {
+				target = "all"
+			}
+			targets, err := a.resolveOTATargets(target)
+			if err != nil {
+				http.Error(w, err.Error(), 404)
+				return
+			}
+			if err := a.otaRunner(targets); err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			writeJSON(w, map[string]any{"ok": true, "targets": targets})
+			return
 		default:
 			http.Error(w, "unknown action", 404)
 			return
@@ -176,6 +240,40 @@ func (a *App) resolveTargets(target string) ([]string, error) {
 		return []string{d.ID}, nil
 	}
 	if d := a.findTeamOrCode(target); d != nil {
+		return []string{d.ID}, nil
+	}
+	return nil, fmt.Errorf("no device, team or code %q", target)
+}
+
+func (a *App) resolveOTATargets(target string) ([]string, error) {
+	target = strings.TrimSpace(target)
+	if target == "all" {
+		var ips []string
+		for _, d := range a.fleet.Snapshot() {
+			if !d.Online || !d.OTA {
+				continue
+			}
+			if d.IP != "" {
+				ips = append(ips, d.IP)
+				continue
+			}
+			ips = append(ips, d.ID)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("no online devices available for OTA update")
+		}
+		return ips, nil
+	}
+	if d := a.fleet.Get(target); d != nil {
+		if d.IP != "" {
+			return []string{d.IP}, nil
+		}
+		return []string{d.ID}, nil
+	}
+	if d := a.findTeamOrCode(target); d != nil {
+		if d.IP != "" {
+			return []string{d.IP}, nil
+		}
 		return []string{d.ID}, nil
 	}
 	return nil, fmt.Errorf("no device, team or code %q", target)

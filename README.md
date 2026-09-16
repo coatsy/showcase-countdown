@@ -156,6 +156,39 @@ page configures a device. Each one answers with `ok:` or `err:`.
 The event date is not in this list. It is resolved to a fixed epoch at build
 time, so moving the event still means a rebuild and reflash.
 
+### Updating devices over Wi-Fi
+
+OTA-capable firmware uses the two-slot `min_spiffs.csv` partition layout. The
+uploader preserves the device's NVS data, including Wi-Fi credentials and team
+configuration, because it writes only the application image.
+
+Create the private OTA password file once before building or updating devices:
+
+```powershell
+.\scripts\setup_ota.ps1
+```
+
+Build the application image and test the uploader without contacting a device:
+
+```powershell
+pio run -e stick
+$env:OTA_PASSWORD = (Get-Content .env.ota | Select-String '^OTA_PASSWORD=').ToString().Split('=', 2)[1].Trim('"')
+python scripts\ota_push.py --target 192.168.8.128 --dry-run
+```
+
+The dashboard server can invoke the same uploader for an individual device or
+all online OTA-capable devices. Set `OTA_RUNNER` in the server environment; the
+`{target}` placeholder is replaced with each device IP:
+
+```powershell
+$env:OTA_RUNNER = 'python ../scripts/ota_push.py --target {target}'
+go run .
+```
+
+The dashboard still requires `ORGANISER_SECRET`. The OTA password is read by
+`ota_push.py` from `OTA_PASSWORD` or the local `.env.ota` file and is never
+placed in the dashboard request or printed by the dry-run command.
+
 ## Setup and building
 
 ### Prerequisites

@@ -78,6 +78,34 @@ func TestFleetOTAMetadata(test *testing.T) {
 	}
 }
 
+func TestDashboardOTAUpdateRoute(t *testing.T) {
+	bus := NewBus(10)
+	fleet := NewFleet(bus)
+	fleet.onState("device-1", []byte(`{"online":true,"team":"Coatsy","ip":"192.168.8.10","ota":true}`))
+	fleet.onState("device-2", []byte(`{"online":false,"team":"Other","ip":"192.168.8.11","ota":true}`))
+	var seen []string
+	app := &App{
+		fleet:     fleet,
+		policy:    NewPolicy(time.Time{}),
+		bus:       bus,
+		secret:    "test-secret",
+		otaRunner: func(targets []string) error { seen = append([]string(nil), targets...); return nil },
+	}
+	mux := http.NewServeMux()
+	app.dashboardRoutes(mux)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/organiser/ota?target=all", nil)
+	request.Header.Set(headerSecret, "test-secret")
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("fleet OTA update returned HTTP %d: %s", response.Code, response.Body.String())
+	}
+	if len(seen) != 1 || seen[0] != "192.168.8.10" {
+		t.Fatalf("fleet OTA update sent the wrong devices: %#v", seen)
+	}
+}
+
 func TestMCPProtocolMetadata(t *testing.T) {
 	for _, version := range []string{"2025-03-26", "2025-11-25"} {
 		for _, withMeta := range []bool{false, true} {

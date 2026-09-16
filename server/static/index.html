@@ -64,7 +64,8 @@
       <h2>Organiser</h2>
       <div class="row"><button id="o-lock">Lock room</button><button id="o-unlock">Unlock</button></div>
       <div class="row"><input id="o-team" placeholder="team or code"><button id="o-mute" class="small">Mute</button><button id="o-unmute" class="small">Unmute</button></div>
-      <div class="hint">Uses the organiser secret from the Send panel.</div>
+      <div class="row"><select id="ota-target"><option value="all">all devices</option></select><button id="o-ota">OTA update</button></div>
+      <div class="hint">Uses the organiser secret from the Send panel. If OTA_RUNNER is configured, the selected devices will be updated over Wi‑Fi.</div>
     </div>
     <div class="panel">
       <h2>Live log</h2>
@@ -244,12 +245,36 @@ $('s-go').onclick = async () => {
   $('s-result').textContent = r.ok ? 'sent' : `${r.status}: ${await r.text()}`;
 };
 async function organiser(action, team) {
-  const r = await fetch(`/api/organiser/${action}?team=${encodeURIComponent(team || '')}`, { method: 'POST', headers: { 'X-Organiser-Secret': $('s-secret').value } });
+  const url = new URL(`/api/organiser/${action}`, window.location.origin);
+  if (team) url.searchParams.set('team', team);
+  const r = await fetch(url, { method: 'POST', headers: { 'X-Organiser-Secret': $('s-secret').value } });
   $('s-result').textContent = r.ok ? action + ' ok' : `${r.status}: ${await r.text()}`;
   refresh();
 }
+
+function populateOtaTargets() {
+  const select = $('ota-target');
+  const current = select.value;
+  const options = ['<option value="all">all devices</option>'];
+  for (const d of (fleet.devices || [])) {
+    if (d.online) {
+      const label = d.team ? `${d.team} (${d.id})` : d.id;
+      options.push(`<option value="${d.id}">${label}</option>`);
+    }
+  }
+  select.innerHTML = options.join('');
+  if (options.some(o => o.includes(`value="${current}"`))) select.value = current;
+  if (!select.value) select.value = 'all';
+}
+
 $('o-lock').onclick = () => organiser('lock'); $('o-unlock').onclick = () => organiser('unlock');
 $('o-mute').onclick = () => organiser('mute', $('o-team').value); $('o-unmute').onclick = () => organiser('unmute', $('o-team').value);
+$('o-ota').onclick = async () => {
+  const target = $('ota-target').value || 'all';
+  const r = await fetch(`/api/organiser/ota?target=${encodeURIComponent(target)}`, { method: 'POST', headers: { 'X-Organiser-Secret': $('s-secret').value } });
+  $('s-result').textContent = r.ok ? `OTA started for ${target}` : `${r.status}: ${await r.text()}`;
+  refresh();
+};
 </script>
 </body>
 </html>
