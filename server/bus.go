@@ -12,6 +12,7 @@ type Event struct {
 	Device string    `json:"device,omitempty"`
 	Team   string    `json:"team,omitempty"`
 	Text   string    `json:"text"`
+	id     uint64
 }
 
 // Bus keeps a ring of recent events and fans new ones out to subscribers.
@@ -20,6 +21,7 @@ type Bus struct {
 	ring []Event
 	subs map[chan Event]struct{}
 	max  int
+	next uint64
 }
 
 func NewBus(max int) *Bus {
@@ -31,6 +33,8 @@ func (b *Bus) Emit(e Event) {
 		e.At = time.Now()
 	}
 	b.mu.Lock()
+	b.next++
+	e.id = b.next
 	b.ring = append(b.ring, e)
 	if len(b.ring) > b.max {
 		b.ring = b.ring[len(b.ring)-b.max:]
@@ -42,6 +46,23 @@ func (b *Bus) Emit(e Event) {
 		}
 	}
 	b.mu.Unlock()
+}
+
+func (b *Bus) RecentAfter(id uint64, n int) []Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	start := 0
+	if id > 0 && len(b.ring) > 0 && id <= b.ring[len(b.ring)-1].id {
+		for start < len(b.ring) && b.ring[start].id <= id {
+			start++
+		}
+	}
+	if len(b.ring)-start > n {
+		start = len(b.ring) - n
+	}
+	out := make([]Event, len(b.ring)-start)
+	copy(out, b.ring[start:])
+	return out
 }
 
 func (b *Bus) Recent(n int) []Event {
