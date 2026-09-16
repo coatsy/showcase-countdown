@@ -741,6 +741,7 @@ void printSettings() {
     const long offset = settings::utcOffsetSeconds();
     Serial.println("current settings:");
     Serial.printf("  team    : %s\n", teamName);
+    Serial.printf("  claim code: %04u\n", static_cast<unsigned>(claimCode));
     Serial.printf("  titles  : %s\n", settings::eventTitles().c_str());
     Serial.printf("  speaker : %s\n", settings::speakerName().c_str());
     Serial.printf("  timezone: UTC%s (%s)\n", settings::formatUtcOffset(offset).c_str(),
@@ -790,6 +791,7 @@ void handleMachineCommand(const String& line) {
     if (verb == "get") {
         const long offset = settings::utcOffsetSeconds();
         Serial.printf("ok: get team=%s\n", teamName);
+        Serial.printf("ok: get claim=%04u\n", static_cast<unsigned>(claimCode));
         Serial.printf("ok: get firmware=%s\n", FIRMWARE_VERSION);
         Serial.printf("ok: get title=%s\n", settings::eventTitles().c_str());
         Serial.printf("ok: get speaker=%s\n", settings::speakerName().c_str());
@@ -1800,7 +1802,7 @@ void setup() {
     snprintf(deviceIdStr, sizeof(deviceIdStr), "%02x%02x%02x", mac[3], mac[4], mac[5]);
     claimCode = claimCodeFor(deviceIdStr, CLAIM_SALT);
     Serial.printf("  id      : %s\n", deviceIdStr);
-    Serial.printf("  claim   : %04u\n", static_cast<unsigned>(claimCode));
+    Serial.printf("  claim code: %04u\n", static_cast<unsigned>(claimCode));
     Serial.printf("  mqtt    : %s\n", messaging::enabled() ? MQTT_HOST : "disabled");
     Serial.printf("  ota     : %s\n", firmware_ota::enabled() ? "configured" : "disabled (no valid password hash)");
     printSerialHelp();
