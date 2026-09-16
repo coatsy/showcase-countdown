@@ -21,6 +21,8 @@
 
 #include "env_config.h"
 #include "espnow_link.h"
+#include "espnow_relay.h"
+#include <esp_wifi.h>
 #include "fanfare.h"
 #include "firmware_ota.h"
 #include "jingles.h"
@@ -752,6 +754,9 @@ void printSettings() {
     const time_t now = time(nullptr);
     Serial.printf("  clock   : %lld (%s)\n", static_cast<long long>(now),
                   timeVerified ? "synced" : "UNVERIFIED");
+    Serial.printf("  source  : %s\n", espnow_relay::timeSource());
+    Serial.printf("  link    : %s\n", messaging::mqttConnected() ? "mqtt" :
+                  (espnow_relay::ready() ? "espnow" : "offline"));
     Serial.printf("  remain  : %lld s\n",
                   static_cast<long long>(EVENT_EPOCH_UTC - static_cast<int64_t>(now)));
     Serial.printf("  state   : fired=%d sprite=%d diag=%d title=%u/%u\n", fired ? 1 : 0,
@@ -1353,7 +1358,7 @@ void renderDiagnostics() {
     M5.Display.printf("voice : %s\n", fanfare::VOICES[voiceIndex].name);
     M5.Display.printf("spkr  : %s\n", M5.Speaker.isEnabled() ? "yes" : "NONE");
     M5.Display.printf("rtc   : %s\n", M5.Rtc.isEnabled() ? "yes" : "no");
-    M5.Display.printf("ntp   : %s\n", timeVerified ? "synced" : "UNVERIFIED");
+    M5.Display.printf("clock : %s\n", espnow_relay::timeSource());
     M5.Display.printf("batt  : %d%%\n", M5.Power.getBatteryLevel());
     M5.Display.printf("leds  : %s\n", LED_ENABLED ? (lightsOn ? "on" : "off") : "disabled");
     M5.Display.printf("panel : %dx%d\n", layout.w, layout.h);
@@ -1427,6 +1432,7 @@ void performCelebration() {
         scheduled += note.ms;
         const uint32_t noteEnd = start + scheduled;
         while (static_cast<int32_t>(noteEnd - millis()) > 0) {
+            espnow_relay::poll();
             renderCelebration(millis() - start, true);
             M5.delay(1);
         }
@@ -1605,7 +1611,81 @@ void onNtpSync(struct timeval*) {
     ntpSyncReceived = true;
 }
 
+relay_core::Recovery radioRecovery;
+bool relayNetworkStarted = false;
+bool relayNtpStarted = false;
+String relaySsid, relayPassword;
+
+void startRelayProbe() {
+    if (!relaySsid.length()) return;
+    // The channel is a driver hint, not a hard scan restriction. The recovery
+    // state machine caps each attempt and parks the radio between attempts.
+    WiFi.begin(relaySsid.c_str(), relayPassword.c_str(), ESPNOW_CHANNEL);
+    Serial.println("relay network: bounded Wi-Fi/MQTT probe");
+}
+
+void serviceRelayNetwork() {
+    if (!espnow_relay::enabled() || !relayNetworkStarted) return;
+    espnow_relay::poll();
+    const bool mqtt = messaging::mqttConnected();
+    const bool critical = nearFanfare();
+    if (radioRecovery.update(millis(), mqtt, relaySsid.length() && MQTT_URI[0], critical)) {
+        if (radioRecovery.phase == relay_core::Recovery::Parked) {
+            WiFi.setAutoReconnect(false);
+            esp_wifi_scan_stop();
+            WiFi.disconnect(false, false);
+            const auto err = esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+            Serial.printf("relay network: parked channel %d (set=%d), retry after 60s\n", ESPNOW_CHANNEL, err);
+        } else if (radioRecovery.phase == relay_core::Recovery::Probe) {
+            startRelayProbe();
+        } else Serial.println("relay network: MQTT stable");
+    }
+    if (radioRecovery.phase == relay_core::Recovery::Parked && WiFi.channel() != ESPNOW_CHANNEL)
+        esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    if (WiFi.status() == WL_CONNECTED && !relayNtpStarted) {
+        ntpSyncReceived = false;
+        sntp_set_time_sync_notification_cb(onNtpSync);
+        configTzTime("UTC0", NTP_SERVER_1, NTP_SERVER_2, NTP_SERVER_3);
+        relayNtpStarted = true;
+    }
+    if (ntpSyncReceived && time(nullptr) > SANE_EPOCH) {
+        ntpSyncReceived = false;
+        timeVerified = true; lastSyncMs = millis();
+        espnow_relay::setTimeSource("ntp");
+        if (M5.Rtc.isEnabled()) {
+            time_t now = time(nullptr);
+            M5.Rtc.setDateTime(gmtime(&now));
+        }
+    } else if (!strcmp(espnow_relay::timeSource(), "espnow")) {
+        if (!timeVerified) {
+            if (M5.Rtc.isEnabled()) {
+                time_t now = time(nullptr);
+                M5.Rtc.setDateTime(gmtime(&now));
+            }
+        }
+        timeVerified = true;
+        lastSyncMs = espnow_relay::timeSyncMs();
+    }
+}
+
 bool syncFromNtp() {
+    if (espnow_relay::enabled()) {
+        relaySsid = settings::ssid(); relayPassword = settings::password();
+        if (!relayNetworkStarted) {
+            WiFi.mode(WIFI_STA);
+            WiFi.setSleep(false); WiFi.setAutoReconnect(false);
+            esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+            espnow_relay::begin(false);
+            messaging::begin(deviceIdStr);
+            relayNetworkStarted = true;
+            radioRecovery.since = millis();
+            startRelayProbe();
+        } else if (WiFi.status() == WL_CONNECTED) {
+            relayNtpStarted = false; // next loop starts asynchronous SNTP
+        }
+        serviceRelayNetwork();
+        return timeVerified;
+    }
     const String ssid = settings::ssid();
     if (ssid.length() == 0) {
         Serial.println("  wifi    : NOT PROVISIONED (use the web installer to set Wi-Fi)");
@@ -1695,6 +1775,7 @@ bool syncFromNtp() {
 
     if (ok) {
         timeVerified = true;
+        espnow_relay::setTimeSource("ntp");
         lastSyncMs = millis();
     }
     return ok;
@@ -1711,6 +1792,7 @@ void waitForFireInstant() {
             return;
         }
         if (remainingUs > 5000) {
+            serviceRelayNetwork();
             M5.delay(1);  // yields, keeps the watchdog fed
         }
     }
@@ -1803,7 +1885,7 @@ void setup() {
     claimCode = claimCodeFor(deviceIdStr, CLAIM_SALT);
     Serial.printf("  id      : %s\n", deviceIdStr);
     Serial.printf("  claim code: %04u\n", static_cast<unsigned>(claimCode));
-    Serial.printf("  mqtt    : %s\n", messaging::enabled() ? MQTT_HOST : "disabled");
+    Serial.printf("  mqtt    : %s\n", MQTT_URI[0] ? MQTT_URI : "disabled");
     Serial.printf("  ota     : %s\n", firmware_ota::enabled() ? "configured" : "disabled (no valid password hash)");
     printSerialHelp();
 
@@ -1822,6 +1904,7 @@ void setup() {
     // attempt. A blank screen during a 10 s WiFi timeout reads as a crash.
     if (M5.Rtc.isEnabled()) {
         M5.Rtc.setSystemTimeFromRtc();
+        if (time(nullptr) > SANE_EPOCH) espnow_relay::setTimeSource("rtc");
     }
     initializeLights();
 
@@ -1842,6 +1925,7 @@ void setup() {
 
 void loop() {
     M5.update();
+    serviceRelayNetwork();
 
     // Serial trigger as well as the button, so a mounted unit can be auditioned
     // without being taken down.
@@ -1957,11 +2041,16 @@ void loop() {
     });
     serviceSequence();
     serviceLedOverride();
+    static bool wasDirect = false;
+    static bool wasConnected = false;
+    const bool changedTransport = wasDirect != messaging::mqttConnected() ||
+                                  wasConnected != messaging::connected();
+    wasDirect = messaging::mqttConnected(); wasConnected = messaging::connected();
     if (messaging::connected() && !nearFanfare() &&
-        millis() - lastStatePublishMs >= STATE_PUBLISH_MS) {
+        (changedTransport || millis() - lastStatePublishMs >= STATE_PUBLISH_MS)) {
         lastStatePublishMs = millis();
         messaging::Status status = {fanfare::VOICES[voiceIndex].name,
-                                    M5.Power.getBatteryLevel(), timeVerified, fired,
+                                    M5.Power.getBatteryLevel(), !strcmp(espnow_relay::timeSource(), "ntp"), fired,
                                     claimCode, teamName};
         messaging::publishState(status);
     }

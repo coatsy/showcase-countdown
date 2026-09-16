@@ -65,6 +65,67 @@ Devices subscribe to `showcase/dev/<id>/cmd/#` and `showcase/all/cmd/#`. The
 retained `config` message means a rebooted stick immediately knows its team
 name and whether the room is locked.
 
+## Public MQTT over secure WebSockets
+
+The legacy `MQTT_HOST`/`MQTT_PORT` configuration uses raw MQTT/TCP and is for
+the trusted event LAN only. An ordinary Cloudflare HTTP tunnel does **not**
+expose that transport directly to ESP32 clients. Cloudflare's published TCP
+service requires client-side `cloudflared`; MQTT over secure WebSockets is
+supported without that extra client.
+
+Private table-stick configuration:
+
+```dotenv
+MQTT_URI="wss://mqtt.cauldnz.org/mqtt"
+MQTT_USERNAME="<device-id>"
+MQTT_PASSWORD="<private-per-device-password-at-least-32-characters>"
+```
+
+`MQTT_URI` overrides the legacy address. The ESP-IDF MQTT client uses its native
+WebSocket/TLS transport and the installed framework's certificate bundle;
+certificate-chain and hostname validation remain enabled. Credentials are
+separate from the URI, which is safe to log. The config loader rejects
+plaintext credentials, unauthenticated WSS and credential-bearing URLs.
+Keep NTP reachable from the selected subnet so TLS can validate certificate
+dates. Wi-Fi credentials remain in NVS, provisioned through Improv.
+
+The public broker is opt-in, with a loopback-only WebSocket listener behind
+Cloudflare Tunnel. Only explicitly configured device credentials may connect.
+Each device may publish its own state/button events and receive its own
+commands plus room broadcasts; it cannot publish commands or access other
+devices' state. The router bridge remains on the LAN: public table-device
+credentials do not grant bridge topics.
+
+Server environment (keep the actual password in the private server env file):
+
+```dotenv
+MQTT_WS_LISTEN=127.0.0.1:8092
+MQTT_WS_USERS={"52f940":"<private-per-device-password-at-least-32-characters>"}
+MCP_ALLOWED_HOSTS=mcp.cauldnz.org
+```
+
+Route only `mqtt.cauldnz.org` to `http://127.0.0.1:8092` through the existing
+tunnel; the WebSocket path is `/mqtt`. TLS terminates at Cloudflare, the tunnel
+encrypts traffic to AX, and its last hop is loopback. Existing LAN clients
+continue using port 1883. Adding users or changing server configuration requires
+an explicitly coordinated server restart, which resets runtime policy state.
+
+`MCP_ALLOWED_HOSTS` is an exact, comma-separated authority allowlist, not a
+wildcard or URL list. Hostname comparisons are case-insensitive; an explicit
+port must be separately listed. Arbitrary Hosts and forged forwarded headers
+remain rejected. Verify MCP using `initialize`, `tools/list` and a tool call;
+GET returning 405 alone is not a handshake. Cloudflare's browser-integrity
+check may separately reject Python urllib's default user agent with error 1010;
+the curl client completed the public handshake without changing WAF settings.
+
+Private images contain MQTT credentials and must **never** be published through
+the web installer, GitHub releases or build artifacts. ArduinoOTA authenticates
+but does not encrypt image transfer: use it only on a trusted LAN, never over
+the public endpoint or shared venue Wi-Fi. See [OTA evidence](ota-feasibility.md).
+
+References: [Cloudflare tunnel protocols](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/protocols/)
+and [WebSocket support](https://developers.cloudflare.com/network/websockets/).
+
 ## Command payloads
 
 Display:
@@ -144,6 +205,25 @@ Organiser scope (calls carrying the organiser secret) adds `broadcast`,
 
 ## Policy (all in the MCP server)
 
+### Dashboard password
+
+Set `DASHBOARD_PASSWORD` in the server environment (on the router,
+`/etc/showcase/server.env`) to require browser HTTP Basic authentication.
+The username is `showcase`; use the configured shared password. This protects
+the dashboard, static assets and all `/api/` endpoints, including the event
+stream. Organiser actions still require the separate organiser secret.
+Leave the variable unset only for the existing trusted-LAN, unauthenticated
+dashboard behavior. Changing it requires a server restart.
+
+Use HTTPS for external access: Basic authentication is not encryption.
+The event deployment uses the Wi-Fi password as requested, stored privately
+on the router, never in source or browser JavaScript. Browsers cache Basic
+credentials; there is no application logout.
+
+This setting does **not** protect `/mcp` or `/mcp/<code>`. Do not expose those
+paths through a public tunnel without separate access controls. A dashboard
+password alone is not permission to publish the entire server.
+
 - Shout cooldown per team 120 s. Direct messages 5 s. Text at most 120
   characters. Display and LED TTLs at most 60 s.
 - An accepted shout sends its 15-second display followed immediately by an
@@ -173,7 +253,15 @@ Organiser scope (calls carrying the organiser secret) adds `broadcast`,
 
 ## ESP-NOW
 
-A second path for the two messages that must land even if a stick's MQTT
+The opt-in [v2 relay candidate](espnow-relay.md) adds bidirectional JSON
+commands/state/buttons and automatic MQTT/ESP-NOW failover through a USB bridge.
+It requires matching private-key-enabled bridge/table firmware and the updated
+Go server. It is not multi-hop mesh or attendee Wi-Fi coverage.
+State now includes `transport` and `time_source`; radio time is not labelled NTP.
+The [OTA investigation](ota-feasibility.md) explains why this candidate retains
+the existing USB-only update layout.
+
+The original, default-disabled-relay firmware provides a second path for the two messages that must land even if a stick's MQTT
 session has dropped: `lock` / `unlock`, and `fire <epoch>`. A spare stick on the
 router's USB port relays them from the server over serial. All sticks listen on
 the AP's pinned 2.4 GHz channel.

@@ -59,11 +59,12 @@ struct Status {
     const char* team;
 };
 
-// Called once after WiFi is up. deviceId is the 6 hex-char id from the MAC.
+// Called once after the station radio starts, including offline relay boots.
 void begin(const char* deviceId);
 
 bool enabled();
 bool connected();
+bool mqttConnected();
 const char* deviceId();
 
 // Drain one inbound command. Handlers run on the caller's task.
