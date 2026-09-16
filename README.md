@@ -344,6 +344,7 @@ certificate-verified MQTT over WebSockets; see [public transport](docs/messaging
 | [docs/plan.md](docs/plan.md) | The decisions, architecture and schedule |
 | [docs/messaging.md](docs/messaging.md) | MQTT topics, payloads and the tool list |
 | [docs/teams.md](docs/teams.md) | The one-page handout for tables |
+| [docs/flashing-quickstart.md](docs/flashing-quickstart.md) | Chris and Coatsey's USB/OTA flashing checklist |
 | [server/](server/) | The Go MCP server, dashboard, fake fleet, and router deploy |
 
 The server, broker, LAN NTP and dashboard run as one Go binary on an
