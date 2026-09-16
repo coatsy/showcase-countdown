@@ -131,7 +131,8 @@ func (a *App) registerDashboardRoutes(mux *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
-		for _, e := range a.bus.Recent(100) {
+		lastID, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
+		for _, e := range a.bus.RecentAfter(lastID, 100) {
 			writeSSE(w, e)
 		}
 		flusher.Flush()
@@ -362,5 +363,5 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func writeSSE(w http.ResponseWriter, e Event) {
 	b, _ := json.Marshal(e)
-	fmt.Fprintf(w, "data: %s\n\n", b)
+	fmt.Fprintf(w, "id: %d\ndata: %s\n\n", e.id, b)
 }

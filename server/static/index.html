@@ -231,7 +231,6 @@ function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;',
 function connectEvents() {
   const es = new EventSource('/api/events');
   es.onmessage = ev => { addLog(JSON.parse(ev.data)); refresh(); };
-  es.onerror = () => { es.close(); setTimeout(connectEvents, 2000); };
 }
 connectEvents();
 
